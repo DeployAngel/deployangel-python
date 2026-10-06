@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.1 (2026-10-06)
 
 - The package includes the `deployangel` command and MCP server, so Python
   projects no longer need the Ruby gem for them: `verify`, `status`, `plan`,
