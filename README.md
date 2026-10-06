@@ -300,7 +300,9 @@ The `deployangel` command line tool and MCP server for coding agents
 (`deployangel verify --wait`) ship with the
 [Ruby gem](https://github.com/DeployAngel/deployangel-ruby) for now.
 `gem install deployangel` installs them; they need Ruby, but not Rails or
-your app.
+your app. When a release isn't cleared yet, `deployangel plan` (or the MCP
+tool `get_exercise_plan`) says what to exercise against production so it
+clears sooner. It works the same for Django, FastAPI, and Flask routes.
 
 ## Development
 
