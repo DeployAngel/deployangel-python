@@ -276,7 +276,18 @@ verifies it from there, with nothing to set up. On Heroku, the add-on also
 registers every release for you.
 
 To register deploys from CI, which also catches a release that never boots,
-post the commit with an API token created for **CI deploys** in the dashboard:
+use an API token created for **CI deploys** in the dashboard. On GitHub
+Actions, add [DeployAngel/verify-release](https://github.com/DeployAngel/verify-release)
+after your deploy step: it registers the deploy, waits for the verdict, and
+fails the step if the release fails.
+
+```yaml
+- uses: DeployAngel/verify-release@v1
+  with:
+    api-token: ${{ secrets.DEPLOYANGEL_API_TOKEN }}
+```
+
+Anywhere else, post the commit:
 
 ```bash
 curl -fsS https://api.deployangel.com/api/v1/deployments \
