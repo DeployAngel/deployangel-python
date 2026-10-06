@@ -50,3 +50,11 @@ DeployAngel cloud has to accept them first.
   full buffers, and forks.
 - Update the README and CHANGELOG when what the agent sends, or how it's
   configured, changes.
+
+## Releasing
+
+Bump `src/deployangel/version.py`, rename the CHANGELOG's "Unreleased"
+heading to `## X.Y.Z (date)`, commit "Release X.Y.Z", and push a `vX.Y.Z`
+tag. `.github/workflows/release.yml` builds the package, waits for a
+maintainer to approve the `pypi` environment, publishes to PyPI through
+trusted publishing (no API token), and then creates the GitHub release.
