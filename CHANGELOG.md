@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.0 (2026-10-06)
 
 - First release: the DeployAngel agent for Python, speaking Agent Protocol v1.
 - Django 4.2+ (WSGI and ASGI), FastAPI 0.100+, Starlette 0.27+, and Flask 2.3+:
