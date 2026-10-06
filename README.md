@@ -345,7 +345,8 @@ The tools are `get_verification`, `wait_for_verification`,
 None of them can change production. When a release isn't cleared yet,
 `deployangel plan` (or `get_exercise_plan`) says what stands between it and
 clearance, and what to exercise against production so it clears sooner.
-Routes that change data are marked; use a test account for them, or ask
+It separates what clearance waits on from changed and rarely used paths
+that are only worth running. Routes that change data are marked; use a test account for them, or ask
 first.
 
 The command and its output match the Ruby gem's `deployangel` command, so the

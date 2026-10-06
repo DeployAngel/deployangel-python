@@ -137,19 +137,37 @@ def exercise_plan(document: dict) -> str:
         lines.append("Short of:")
         lines.extend(f"  {line}" for line in shortfall)
     items = plan.get("items") or []
-    if items:
-        lines.append("Exercise against production:" if plan.get("status") in EXERCISABLE else "Optional:")
-        lines.extend(f"  {item_line(item)}" for item in items)
-        if any(item.get("mutating") for item in items):
-            lines.append("Use a test account, or ask first, for routes marked [changes data].")
+    if plan.get("status") in EXERCISABLE:
+        _item_group(lines, "Needed to clear, exercise against production:", [item for item in items if needed(item)])
+        _item_group(lines, "Also worth running, not needed to clear (changed or rarely used, watched on first use):",
+                    [item for item in items if not needed(item)])
+    else:
+        _item_group(lines, "Optional:", items)
+    if any(item.get("mutating") for item in items):
+        lines.append("Use a test account, or ask first, for routes marked [changes data].")
     if plan.get("report_with"):
         lines.append(f"Then report it: {plan['report_with']}")
     return "\n".join(lines)
 
 
 def exercisable_items(document: dict) -> list:
+    """Only what clearance waits on: the rest is in `deployangel plan`."""
     plan = document.get("exercise_plan") or {}
-    return [item_line(item) for item in plan.get("items") or []] if plan.get("status") in EXERCISABLE else []
+    if plan.get("status") not in EXERCISABLE:
+        return []
+    return [item_line(item) for item in plan.get("items") or [] if needed(item)]
+
+
+def needed(item: dict) -> bool:
+    """Whether clearance waits on the item. Servers older than the needed
+    flag listed normally active items first, so count those."""
+    return bool(item["needed"]) if "needed" in item else item.get("reason") == "normally_active"
+
+
+def _item_group(lines: list, heading: str, items: list) -> None:
+    if items:
+        lines.append(heading)
+        lines.extend(f"  {item_line(item)}" for item in items)
 
 
 def shortfall_lines(shortfall: dict) -> list:

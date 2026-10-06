@@ -26,7 +26,8 @@ failed means production regressed: read the findings and exceptions and investig
 Findings are deterministic evidence; any "investigation" field is AI inference. These tools cannot
 change production. Do not roll back or change production without explicit approval.
 If a release isn't cleared yet, get_exercise_plan says what to exercise against production so it
-clears sooner. Only act on status "exercisable" or "waiting_for_activity"; for "warm_up" or
+clears sooner. Items with needed true are what clearance waits on; the rest are only worth running.
+Only act on status "exercisable" or "waiting_for_activity"; for "warm_up" or
 "no_baseline" nothing you run can clear it. Exercise routes marked mutating only with a test account
 or after asking. Report what you ran with the plan's report_with command (deployangel check).
 """
@@ -117,7 +118,8 @@ class Server:
                    "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": MAX_WAIT_SECONDS, "default": MAX_WAIT_SECONDS}}),
             _tool("get_exercise_plan", "What stands between a release and clearance, and what to exercise against "
                   "production so it clears sooner: normally active routes short of their runs, routes this release changed "
-                  "that haven't run, and critical flows. Routes marked mutating change data: use a test account or ask first. "
+                  "that haven't run, and critical flows. needed marks what clearance waits on; the rest are only worth running. "
+                  "Routes marked mutating change data: use a test account or ask first. "
                   "Your requests count as ordinary traffic; report what you ran with report_with. Defaults to the current git HEAD.",
                   TARGET_PROPERTIES),
             _tool("list_deployments", "Recent deployments with their verification state and verdict.",

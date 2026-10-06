@@ -79,9 +79,11 @@ def exercise_plan(status="exercisable"):
             "shortfall": {"rule": "low_volume", "requests": {"have": 12, "need": 30},
                           "routes_run_3_times": {"have": 1, "need": 3, "of": 3}},
             "items": [
-                {"kind": "route", "key": "GET /orders/<int:pk>/", "reason": "normally_active", "runs": 1, "runs_needed": 3, "mutating": False},
-                {"kind": "route", "key": "POST /password_resets/", "reason": "changed_in_release", "runs": 0, "mutating": True},
-                {"kind": "job_class", "key": "send_invoice", "reason": "normally_active", "runs": 0, "triggered_by": "app_behavior"},
+                {"kind": "route", "key": "GET /orders/<int:pk>/", "reason": "normally_active", "runs": 1, "runs_needed": 3, "mutating": False,
+                 "needed": True},
+                {"kind": "route", "key": "POST /password_resets/", "reason": "changed_in_release", "runs": 0, "mutating": True, "needed": False},
+                {"kind": "job_class", "key": "send_invoice", "reason": "normally_active", "runs": 0, "triggered_by": "app_behavior",
+                 "needed": True},
             ],
             "report_with": 'deployangel check --name="exercise plan" --status=pass --covers="GET /orders/<int:pk>/,POST /password_resets/,send_invoice"'}
 
@@ -304,6 +306,16 @@ class TestPlan:
                      "send_invoice (normally active, runs when the app starts it)", "Use a test account, or ask first",
                      'Then report it: deployangel check --name="exercise plan"'):
             assert text in out
+        # What clearance waits on comes first; the rest is only worth running.
+        also = out.index("Also worth running, not needed to clear")
+        assert out.index("Needed to clear") < out.index("send_invoice") < also < out.index("POST /password_resets/")
+
+    def test_counts_normally_active_items_as_needed_from_a_server_that_doesnt_say(self, run):
+        plan = exercise_plan()
+        plan["items"] = [{k: v for k, v in item.items() if k != "needed"} for item in plan["items"]]
+        run("plan", "--format=text", client=FakeClient([{**verdict_document("observing"), "exercise_plan": plan}]))
+        out = run.stdout.getvalue()
+        assert out.index("GET /orders/<int:pk>/") < out.index("Also worth running")
 
     def test_prints_the_deployment_and_plan_as_json(self, run):
         run("plan", "--format=json", client=FakeClient([self.document()]))
@@ -321,7 +333,8 @@ class TestPlan:
         run("verify", "--format=text", client=FakeClient([self.document()]), env={"GITHUB_STEP_SUMMARY": str(path)})
         assert "To clear sooner, exercise (deployangel plan for details):" in run.stdout.getvalue()
         assert "**To clear sooner, exercise (deployangel plan for details)**" in path.read_text()
-        assert "- POST /password_resets/" in path.read_text()
+        assert "- send_invoice" in path.read_text()
+        assert "POST /password_resets/" not in run.stdout.getvalue() + path.read_text()
 
     def test_leaves_verify_alone_when_theres_nothing_to_exercise(self, run):
         warm = {**verdict_document("observing"), "exercise_plan": exercise_plan("warm_up")}

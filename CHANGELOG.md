@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- `deployangel plan` separates what clearance waits on ("Needed to clear")
+  from changed and rarely used paths that are only worth running, and
+  `deployangel verify` and the GitHub Actions job summary list only what's
+  needed. The MCP tool `get_exercise_plan` describes the server's new
+  `needed` flag on each item.
+
 ## 0.1.2 (2026-10-06)
 
 - The MCP tools `list_deployments` and `list_late_regressions` return their
