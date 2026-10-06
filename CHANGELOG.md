@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.4 (2026-10-06)
 
 - Checkpoints report whether they were recorded while handling an HTTP request
   or while running a job (each entry in `checkpoints` gains `http` and `job`
