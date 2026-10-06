@@ -325,8 +325,19 @@ GitHub Actions, `verify` also writes the verdict to the job's summary.
 For coding agents:
 
 ```bash
-claude mcp add deployangel -- deployangel mcp        # or: -- uvx deployangel mcp
+claude mcp add deployangel -- deployangel mcp        # Claude Code (or: -- uvx deployangel mcp)
 ```
+
+For Codex, in `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.deployangel]
+command = "deployangel"     # or "uvx", with args = ["deployangel", "mcp"]
+args = ["mcp"]
+```
+
+Any other MCP client (Cursor, VS Code, Zed, ...) runs the same command. The
+server needs `DEPLOYANGEL_API_TOKEN` in the environment it starts in.
 
 The tools are `get_verification`, `wait_for_verification`,
 `get_exercise_plan`, `list_deployments`, `get_exception`,
