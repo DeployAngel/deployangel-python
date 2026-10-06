@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.2 (2026-10-06)
 
 - The MCP tools `list_deployments` and `list_late_regressions` return their
   lists inside an object (`{"deployments": [...]}`, `{"late_regressions":
