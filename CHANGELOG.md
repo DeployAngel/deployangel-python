@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.3 (2026-10-06)
 
 - `deployangel plan` separates what clearance waits on ("Needed to clear")
   from changed and rarely used paths that are only worth running, and
