@@ -12,7 +12,7 @@ from typing import Optional
 
 import deployangel
 from deployangel import http
-from deployangel.core import redaction
+from deployangel.core import redaction, work
 from deployangel.metadata import module_file
 
 ROUTE = "deployangel.route"
@@ -55,11 +55,14 @@ class WsgiMiddleware:
             status.append(status_line)
             return start_response(status_line, headers, exc_info)
 
+        unit = work.begin(work.HTTP)
         try:
             response = self.wsgi_app(environ, start_response_with_status)
         except Exception as exception:
             _record(environ, 500, started, exception)
             raise
+        finally:
+            work.end(unit)
         code = _status_code(status[-1]) if status else 500
         _record(environ, code, started, environ.get(EXCEPTION) if code >= 500 else None)
         return response

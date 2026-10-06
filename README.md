@@ -264,6 +264,12 @@ and job still succeeds. Only drops are flagged, and a checkpoint without enough
 traffic never blocks a release from being cleared. Checkpoints can also be part
 of a critical flow (`checkpoint:order.created`).
 
+The agent also records whether each checkpoint happened while handling an HTTP
+request or while running a job (a Celery task or RQ job, including one run
+eagerly inside a request), so DeployAngel compares it against the right
+traffic: requests for checkpoints recorded in requests, job runs for ones
+recorded in jobs.
+
 It's safe to call anywhere: it never raises, never touches the network, and is
 ignored outside reporting environments. Names use letters, numbers, and
 `. _ : -` (up to 100 characters); keep them to a fixed set rather than

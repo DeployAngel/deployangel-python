@@ -2,10 +2,16 @@ import pytest
 from conftest import drain
 
 import deployangel
+from deployangel.core import work
 
 
 def routes(payload):
     return {route["key"]: route["requests"] for route in payload["routes"]}
+
+
+def checkpoints(payload):
+    """key -> (count, recorded in a request, recorded in a job)"""
+    return {entry["key"]: (entry["count"], entry["http"], entry["job"]) for entry in payload["checkpoints"]}
 
 
 @pytest.fixture
@@ -71,6 +77,50 @@ def test_fastapi_lists_routes_with_their_endpoints(fastapi_app):
     assert not any(key.startswith(("HEAD", "GET /docs", "GET /openapi")) for key in table)
 
 
+def test_fastapi_checkpoints_count_as_recorded_in_a_request(fastapi_app):
+    agent, app, client = fastapi_app
+
+    @app.post("/carts/{cart_id}/checkout")
+    async def checkout(cart_id: int):
+        deployangel.checkpoint("order.created")
+        return {"id": cart_id}
+
+    @app.post("/carts/{cart_id}/sync-checkout")
+    def sync_checkout(cart_id: int):  # runs in Starlette's thread pool
+        deployangel.checkpoint("order.created")
+        return {"id": cart_id}
+
+    @app.post("/carts/{cart_id}/declined")
+    async def declined(cart_id: int):
+        deployangel.checkpoint("payment.attempted")
+        raise RuntimeError("card declined")
+
+    client.post("/carts/1/checkout")
+    client.post("/carts/1/sync-checkout")
+    client.post("/carts/1/declined")
+    deployangel.checkpoint("order.created")
+    assert checkpoints(drain(agent)) == {"order.created": (3, 2, 0), "payment.attempted": (1, 1, 0)}
+
+
+async def test_asgi_middleware_ends_the_request_when_the_app_raises(started_agent):
+    from deployangel.asgi import DeployAngelMiddleware
+
+    agent = started_agent(framework="starlette")
+    seen = []
+
+    async def app(scope, receive, send):
+        seen.append(work.current())
+        deployangel.checkpoint("payment.attempted")
+        raise RuntimeError("card declined")
+
+    with pytest.raises(RuntimeError):
+        await DeployAngelMiddleware(app)({"type": "http", "method": "POST", "path": "/pay", "headers": []}, None, None)
+    assert seen == [work.HTTP]
+    assert work.current() is None
+    deployangel.checkpoint("payment.attempted")
+    assert checkpoints(drain(agent)) == {"payment.attempted": (2, 1, 0)}
+
+
 def test_starlette_without_fastapi(started_agent):
     from starlette.applications import Starlette
     from starlette.responses import PlainTextResponse
@@ -133,6 +183,29 @@ def test_flask_records_exceptions_flask_propagates(flask_app):
     payload = drain(agent)
     assert payload["http"]["status_counts"] == {"500": 1}
     assert payload["exceptions"][0]["sources"] == {"route:GET /boom": 1}
+
+
+def test_flask_checkpoints_count_as_recorded_in_a_request(flask_app):
+    agent, app, client = flask_app
+
+    @app.post("/orders")
+    def create_order():
+        deployangel.checkpoint("order.created")
+        return {"id": 1}, 201
+
+    @app.post("/payments")
+    def pay():
+        deployangel.checkpoint("payment.attempted")
+        raise KeyError("declined")
+
+    client.post("/orders")
+    client.post("/payments")  # a 500 Flask renders itself
+    app.testing = True  # Flask re-raises into this thread
+    with pytest.raises(KeyError):
+        client.post("/payments")
+    assert work.current() is None
+    deployangel.checkpoint("order.created")
+    assert checkpoints(drain(agent)) == {"order.created": (2, 1, 0), "payment.attempted": (2, 2, 0)}
 
 
 def test_flask_lists_url_rules(flask_app):

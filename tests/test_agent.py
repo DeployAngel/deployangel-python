@@ -110,8 +110,27 @@ def test_checkpoints_are_counted_and_announced(started_agent):
     deployangel.checkpoint("order.created", count=2)
     deployangel.checkpoint("not a valid name!")
     payload = drain(agent)
-    assert payload["checkpoints"] == [{"key": "order.created", "count": 3}]
+    # Outside any request or job: neither, but both fields are always sent.
+    assert payload["checkpoints"] == [{"key": "order.created", "count": 3, "http": 0, "job": 0}]
     assert "checkpoints" in payload["capabilities"]
+
+
+def test_checkpoints_report_whether_they_were_recorded_in_a_request_or_a_job(started_agent):
+    from deployangel.core import work
+
+    agent = started_agent()
+    request = work.begin(work.HTTP)
+    deployangel.checkpoint("order.created", count=3)
+    job = work.begin(work.JOB)  # a task run eagerly inside the request
+    deployangel.checkpoint("order.created")
+    work.end(job)
+    deployangel.checkpoint("order.created")
+    work.end(request)
+    deployangel.checkpoint("order.created", count=2)
+    deployangel.checkpoint("export.finished")
+    payload = drain(agent)
+    assert payload["checkpoints"] == [{"key": "order.created", "count": 7, "http": 4, "job": 1},
+                                      {"key": "export.finished", "count": 1, "http": 0, "job": 0}]
 
 
 def test_sends_metadata_once_and_files_only_when_the_cloud_asks(fake_clock):

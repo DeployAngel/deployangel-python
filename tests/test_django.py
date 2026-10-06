@@ -83,6 +83,28 @@ async def test_records_requests_served_under_asgi(agent):
     assert set(routes(drain(agent))) == {"GET /async/<int:pk>/"}
 
 
+def checkpoints(payload):
+    return {entry["key"]: (entry["count"], entry["http"], entry["job"]) for entry in payload["checkpoints"]}
+
+
+def test_checkpoints_count_as_recorded_in_a_request(agent):
+    from deployangel.core import work
+
+    Client().post("/place-order/")
+    Client(raise_request_exception=False).post("/place-order/?fail=1")
+    with pytest.raises(ValueError):
+        Client().post("/place-order/?fail=1")
+    assert work.current() is None
+    deployangel.checkpoint("order.created")
+    assert checkpoints(drain(agent)) == {"order.created": (4, 3, 0)}
+
+
+async def test_checkpoints_count_as_recorded_in_a_request_under_asgi(agent):
+    await AsyncClient().post("/async/place-order/")
+    await AsyncClient().post("/place-order/")  # a sync view, run in a thread
+    assert checkpoints(drain(agent)) == {"order.created": (2, 2, 0)}
+
+
 def test_lists_routes_with_their_methods_views_and_files(agent):
     table = {route["key"]: route for route in DjangoRoutes().routes()}
     # A plain function view's methods can't be told, so it's listed under ANY.

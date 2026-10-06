@@ -1,8 +1,8 @@
 import os
 
 from deployangel.config import Configuration
-from deployangel.core import fingerprint, histogram, release
-from deployangel.core.aggregator import OTHER, Aggregator
+from deployangel.core import fingerprint, histogram, release, work
+from deployangel.core.aggregator import MAX_CHECKPOINTS, OTHER, Aggregator
 from deployangel.core.buffer import Buffer
 
 ROOT = "/app"
@@ -211,6 +211,62 @@ def test_aggregator_keeps_a_backtrace_only_the_first_time(fake_clock):
     assert (entry["count"], entry["sources"], entry["backtrace"]) == (1, {"route:GET /": 1}, ["a.py#x"])
     assert second.exceptions[details["fingerprint"]]["handled_count"] == 1
     assert "backtrace" not in second.exceptions[details["fingerprint"]]
+
+
+
+def test_aggregator_counts_checkpoints_by_where_they_were_recorded(fake_clock):
+    aggregator = Aggregator(clock=fake_clock)
+    aggregator.record_checkpoint("order.created", 2, work.HTTP)
+    aggregator.record_checkpoint("order.created", 1, work.JOB)
+    aggregator.record_checkpoint("order.created", 4)
+    period = aggregator.drain(include_current=True)[0]
+    assert period.checkpoints == {"order.created": [7, 2, 1]}
+
+
+def test_aggregator_folds_checkpoints_beyond_the_cap_with_where_they_were_recorded(fake_clock):
+    aggregator = Aggregator(clock=fake_clock)
+    for i in range(MAX_CHECKPOINTS - 1):
+        aggregator.record_checkpoint(f"c{i}", 1)
+    aggregator.record_checkpoint("late.http", 3, work.HTTP)
+    aggregator.record_checkpoint("late.job", 2, work.JOB)
+    aggregator.record_checkpoint("late.neither", 1)
+    period = aggregator.drain(include_current=True)[0]
+    assert len(period.checkpoints) == MAX_CHECKPOINTS
+    assert period.checkpoints[OTHER] == [6, 3, 2]
+
+
+def test_units_of_work_nest_and_the_innermost_wins():
+    assert work.current() is None
+    request = work.begin(work.HTTP)
+    assert work.current() == work.HTTP
+    job = work.begin(work.JOB)
+    assert work.current() == work.JOB
+    work.end(job)
+    assert work.current() == work.HTTP
+    work.end(request)
+    assert work.current() is None
+
+
+def test_ending_a_unit_of_work_never_raises():
+    token = work.begin(work.JOB)
+    work.end(token)
+    work.end(token)  # already used
+    work.end(None)
+    assert work.current() is None
+
+
+def test_units_of_work_are_separate_per_thread():
+    import threading
+
+    seen = []
+    token = work.begin(work.HTTP)
+    try:
+        thread = threading.Thread(target=lambda: seen.append(work.current()))
+        thread.start()
+        thread.join()
+    finally:
+        work.end(token)
+    assert seen == [None]
 
 
 # Buffer

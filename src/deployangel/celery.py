@@ -17,6 +17,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import deployangel
+from deployangel.core import work
 from deployangel.metadata import module_file
 
 # A header added to each task message at publish, read back when it runs, so
@@ -27,6 +28,9 @@ PERIODS = {"days": 86400, "hours": 3600, "minutes": 60, "seconds": 1, "microseco
 
 _installed = False
 _app = None
+# task id -> a stack of (started, queue latency, unit-of-work token), one per
+# attempt running now: an eager retry can run inside the attempt it retries,
+# under the same id.
 _running: dict = {}
 _lock = threading.Lock()
 
@@ -72,17 +76,25 @@ def _before_publish(sender=None, headers=None, **kwargs) -> None:
 def _prerun(sender=None, task_id=None, task=None, **kwargs) -> None:
     try:
         if deployangel.recording() and task_id is not None:
-            _running[task_id] = (time.perf_counter(), _queue_latency_ms(task))
+            started = (time.perf_counter(), _queue_latency_ms(task))
+            _running.setdefault(task_id, []).append(started + (work.begin(work.JOB),))
     except Exception:
         pass
 
 
 def _postrun(sender=None, task_id=None, task=None, state=None, **kwargs) -> None:
     try:
-        started = _running.pop(task_id, None)
-        if started is None or not deployangel.recording():
+        attempts = _running.get(task_id)
+        if not attempts:
             return
-        perf_started, latency = started
+        perf_started, latency, unit = attempts.pop()
+        if not attempts:
+            _running.pop(task_id, None)
+        # Celery sends task_postrun from a finally block in the thread that ran
+        # the task, so the unit of work ends even when the task raised.
+        work.end(unit)
+        if not deployangel.recording():
+            return
         deployangel.record_job(
             job_class=_task_name(task, sender),
             duration_ms=(time.perf_counter() - perf_started) * 1000.0,

@@ -4,10 +4,16 @@ import pytest
 from conftest import drain
 
 import deployangel
+from deployangel.core import work
 
 
 def jobs(payload):
     return {entry["key"]: entry for entry in payload["job_classes"]}
+
+
+def checkpoints(payload):
+    """key -> (count, recorded in a request, recorded in a job)"""
+    return {entry["key"]: (entry["count"], entry["http"], entry["job"]) for entry in payload["checkpoints"]}
 
 
 # Celery
@@ -28,7 +34,13 @@ def celery_app():
 
     @app.task(name="shop.tasks.charge")
     def charge(order_id):
+        deployangel.checkpoint("payment.attempted")
         raise ValueError(f"card for order {order_id} declined")
+
+    @app.task(name="shop.tasks.fulfil")
+    def fulfil(order_id):
+        deployangel.checkpoint("order.fulfilled")
+        return order_id
 
     @app.task(name="shop.tasks.sync", bind=True, max_retries=1)
     def sync(self):
@@ -92,6 +104,62 @@ def test_celery_a_retried_attempt_fails_without_being_discarded(celery_agent, ce
     assert payload["exceptions"][0]["exception_class"] == "ConnectionError"
 
 
+def test_celery_checkpoints_count_as_recorded_in_a_job(celery_agent, celery_app):
+    run_worker(celery_app, lambda: celery_app.tasks["shop.tasks.fulfil"].delay(1),
+               lambda: celery_app.tasks["shop.tasks.charge"].delay(2))
+    deployangel.checkpoint("order.fulfilled")
+    assert checkpoints(drain(celery_agent)) == {"order.fulfilled": (2, 0, 1), "payment.attempted": (1, 0, 1)}
+
+
+def test_celery_a_failed_eager_task_ends_its_job(celery_agent, celery_app):
+    result = celery_app.tasks["shop.tasks.charge"].apply((7,))
+    assert result.failed()
+    assert work.current() is None
+    deployangel.checkpoint("payment.attempted")
+    assert checkpoints(drain(celery_agent)) == {"payment.attempted": (2, 0, 1)}
+
+
+def test_celery_an_eager_retry_inside_its_attempt_ends_both(celery_agent, celery_app):
+    """An eager retry can run inside the attempt it retries, under the same
+    task id (Celery 5.3 does); each attempt ends its own job."""
+    from deployangel import celery as integration
+
+    task = celery_app.tasks["shop.tasks.fulfil"]
+    integration._prerun(task_id="t1", task=task)
+    integration._prerun(task_id="t1", task=task)
+    deployangel.checkpoint("order.fulfilled")
+    integration._postrun(task_id="t1", task=task, state="SUCCESS")
+    integration._postrun(task_id="t1", task=task, state="RETRY")
+    assert work.current() is None and integration._running == {}
+    payload = drain(celery_agent)
+    assert jobs(payload)["shop.tasks.fulfil"]["processed"] == 2
+    assert checkpoints(payload) == {"order.fulfilled": (1, 0, 1)}
+
+
+def test_celery_a_task_run_eagerly_inside_a_request_counts_as_a_job(celery_agent, celery_app):
+    pytest.importorskip("flask")
+    from flask import Flask
+
+    import deployangel.flask
+
+    app = Flask(__name__)
+
+    @app.post("/orders")
+    def create_order():
+        deployangel.checkpoint("order.created")
+        celery_app.tasks["shop.tasks.fulfil"].apply((1,))
+        celery_app.tasks["shop.tasks.fulfil"].delay(2)  # task_always_eager
+        deployangel.checkpoint("order.created")
+        return {"id": 1}, 201
+
+    deployangel.flask.init_app(app)
+    celery_app.conf.task_always_eager = True
+    assert app.test_client().post("/orders").status_code == 201
+    payload = drain(celery_agent)
+    assert checkpoints(payload) == {"order.created": (2, 2, 0), "order.fulfilled": (2, 0, 2)}
+    assert jobs(payload)["shop.tasks.fulfil"]["processed"] == 2
+
+
 def test_celery_lists_tasks_and_beat_schedules(celery_agent, celery_app):
     from celery.schedules import crontab
 
@@ -106,7 +174,8 @@ def test_celery_lists_tasks_and_beat_schedules(celery_agent, celery_app):
         "custom": {"task": "shop.tasks.sync", "schedule": object()},
     }
     source = CelerySource()
-    assert set(source.job_classes()) == {"shop.tasks.send_receipt", "shop.tasks.charge", "shop.tasks.sync"}
+    assert set(source.job_classes()) == {"shop.tasks.send_receipt", "shop.tasks.charge", "shop.tasks.sync",
+                                         "shop.tasks.fulfil"}
     schedules = {s["key"]: s for s in source.schedules()}
     assert schedules["nightly receipts"] == {"key": "nightly receipts", "class": "shop.tasks.send_receipt",
                                              "source": "celery_beat", "time_zone": "Europe/Berlin", "schedule": "30 2,14 * * *"}
@@ -134,6 +203,13 @@ def receipt(order_id):
 
 def failing_charge(order_id):
     raise ValueError(f"card for order {order_id} declined")
+
+
+def fulfil(order_id):
+    deployangel.checkpoint("order.fulfilled")
+    if order_id < 0:
+        raise ValueError("no such order")
+    return order_id
 
 
 @pytest.fixture
@@ -167,6 +243,20 @@ def test_rq_records_jobs_and_parses_failures_from_tracebacks(started_agent, rq_q
     assert exception["top_frame"] == "tests/test_jobs.py#failing_charge"
     assert exception["sources"] == {"job_class:test_jobs.failing_charge": 2}
     assert "jobs" in payload["capabilities"]
+
+
+def test_rq_checkpoints_count_as_recorded_in_a_job(started_agent, rq_queue):
+    import deployangel.rq
+
+    agent = started_agent(framework="rq")
+    rq_queue.enqueue(fulfil, 1)
+    rq_queue.enqueue(fulfil, -1)
+    deployangel.rq.SimpleWorker([rq_queue], connection=rq_queue.connection).work(burst=True)
+    assert work.current() is None
+    deployangel.checkpoint("order.fulfilled")
+    payload = drain(agent)
+    assert checkpoints(payload) == {"order.fulfilled": (3, 0, 2)}
+    assert jobs(payload)["test_jobs.fulfil"]["failed"] == 1
 
 
 def test_rq_forking_worker_records_from_the_parent_after_each_horse(started_agent):

@@ -4,6 +4,8 @@ from rest_framework import viewsets
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
+import deployangel
+
 
 def product(request, pk):
     return HttpResponse(f"product {pk}")
@@ -15,6 +17,18 @@ def checkout(request):
 
 def healthz(request):
     return HttpResponse("ok")
+
+
+def place_order(request):
+    deployangel.checkpoint("order.created")
+    if request.GET.get("fail"):
+        raise ValueError("card declined")
+    return HttpResponse("ok", status=201)
+
+
+async def async_place_order(request):
+    deployangel.checkpoint("order.created")
+    return HttpResponse("ok", status=201)
 
 
 async def async_product(request, pk):

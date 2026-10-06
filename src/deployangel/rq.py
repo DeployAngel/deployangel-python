@@ -17,7 +17,7 @@ import rq
 from rq.job import JobStatus
 
 import deployangel
-from deployangel.core import fingerprint
+from deployangel.core import fingerprint, work
 
 RETRYING = (JobStatus.SCHEDULED, JobStatus.QUEUED, JobStatus.DEFERRED)
 ENDED_WITHOUT_FAILING = (JobStatus.STOPPED, JobStatus.CANCELED)
@@ -38,9 +38,13 @@ class InstrumentedWorkerMixin:
             return super().execute_job(job, queue)
         started = time.perf_counter()
         retries_left = getattr(job, "retries_left", None)
+        # Set before RQ forks a work horse, which inherits it, so the job runs
+        # inside it with either worker class.
+        unit = work.begin(work.JOB)
         try:
             return super().execute_job(job, queue)
         finally:
+            work.end(unit)
             record(job, started, retries_left)
 
 

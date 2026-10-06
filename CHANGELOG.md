@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Checkpoints report whether they were recorded while handling an HTTP request
+  or while running a job (each entry in `checkpoints` gains `http` and `job`
+  counts), so DeployAngel compares a checkpoint recorded in jobs against job
+  traffic rather than requests. A task run eagerly inside a request counts as
+  a job. This needs a DeployAngel server that reads the new fields; older
+  servers ignore them.
+
 ## 0.1.3 (2026-10-06)
 
 - `deployangel plan` separates what clearance waits on ("Needed to clear")

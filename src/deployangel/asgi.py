@@ -13,7 +13,7 @@ from typing import Optional
 
 import deployangel
 from deployangel import http
-from deployangel.core import redaction
+from deployangel.core import redaction, work
 from deployangel.metadata import module_file
 
 IGNORED_METHODS = ("HEAD", "OPTIONS")
@@ -56,11 +56,14 @@ class DeployAngelMiddleware:
                 status.append(message.get("status", 200))
             await send(message)
 
+        unit = work.begin(work.HTTP)
         try:
             await self.app(scope, receive, send_with_status)
         except Exception as exception:
             _record(scope, original, outer_app, 500, started, exception)
             raise
+        finally:
+            work.end(unit)
         _record(scope, original, outer_app, status[0] if status else 500, started, None)
 
 

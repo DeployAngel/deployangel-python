@@ -8,6 +8,7 @@ import threading
 import time
 from typing import Callable, Optional
 
+from deployangel.core import work
 from deployangel.core.histogram import Histogram
 
 OTHER = "__other__"
@@ -68,7 +69,8 @@ class Period:
         self.job_classes: dict[str, JobStats] = {}
         self.exceptions: dict[str, dict] = {}
         self.exceptions_truncated = 0
-        self.checkpoints: dict[str, int] = {}
+        # name -> [count, recorded in an HTTP request, recorded in a job]
+        self.checkpoints: dict[str, list] = {}
 
     def record(self, route_key: str, status: int, duration_ms: float, unhandled: bool, max_routes: int, in_totals: bool) -> None:
         if in_totals:
@@ -95,9 +97,16 @@ class Period:
             stats = self.job_classes[key] = JobStats()
         return stats
 
-    def record_checkpoint(self, name: str, count: int) -> None:
+    def record_checkpoint(self, name: str, count: int, unit_of_work: Optional[str] = None) -> None:
         key = _bounded_key(self.checkpoints, name, MAX_CHECKPOINTS)
-        self.checkpoints[key] = self.checkpoints.get(key, 0) + count
+        counts = self.checkpoints.get(key)
+        if counts is None:
+            counts = self.checkpoints[key] = [0, 0, 0]
+        counts[0] += count
+        if unit_of_work == work.HTTP:
+            counts[1] += count
+        elif unit_of_work == work.JOB:
+            counts[2] += count
 
     def record_exception(self, details: dict, source: Optional[str], handled: bool, backtrace: Optional[list]) -> None:
         """Up to 20 fingerprints per period; the rest are only counted."""
@@ -155,9 +164,11 @@ class Aggregator:
             period.jobs.record_discard()
             period.job_stats(str(job_class), self.max_routes).record_discard()
 
-    def record_checkpoint(self, name: str, count: int = 1) -> None:
+    def record_checkpoint(self, name: str, count: int = 1, unit_of_work: Optional[str] = None) -> None:
+        """unit_of_work: work.HTTP or work.JOB when the checkpoint was recorded
+        while handling a request or running a job, else None."""
         with self._lock:
-            self._period().record_checkpoint(name, count)
+            self._period().record_checkpoint(name, count, unit_of_work)
 
     def record_exception(self, details: dict, source: Optional[str] = None, handled: bool = False,
                          backtrace: Optional[list] = None) -> None:

@@ -10,6 +10,8 @@ urlpatterns = [
     path("products/<int:pk>/", views.product),
     path("async/<int:pk>/", views.async_product),
     path("checkout/", views.checkout),
+    path("place-order/", views.place_order),
+    path("async/place-order/", views.async_place_order),
     path("healthz/", views.healthz),
     path("orders/<int:pk>/", views.OrderView.as_view()),
     path("api/", include([

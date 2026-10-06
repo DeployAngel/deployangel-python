@@ -10,7 +10,7 @@ import threading
 import time
 from typing import Callable, Mapping, Optional
 
-from deployangel.core import fingerprint, protocol, redaction
+from deployangel.core import fingerprint, protocol, redaction, work
 from deployangel.core import release as release_module
 from deployangel.core.aggregator import Aggregator
 from deployangel.core.buffer import Buffer
@@ -91,7 +91,7 @@ class Agent:
         try:
             self._check_fork()
             self.start_reporter()
-            self._aggregator.record_checkpoint(name, count)
+            self._aggregator.record_checkpoint(name, count, work.current())
         except Exception as error:
             self._warn_once("record_checkpoint", f"DeployAngel failed to record a checkpoint: {type(error).__name__}: {error}")
 

@@ -45,7 +45,10 @@ def telemetry(period: Period, instance, release, runtime: dict, capabilities: li
         "exceptions_truncated": period.exceptions_truncated,
         "jobs": job_stats(period.jobs),
         "job_classes": [dict({"key": key}, **job_stats(stats)) for key, stats in period.job_classes.items()],
-        "checkpoints": [{"key": key, "count": count} for key, count in period.checkpoints.items()],
+        # http and job: how many of count were recorded while handling an
+        # HTTP request or running a job; the rest were neither.
+        "checkpoints": [{"key": key, "count": count, "http": http, "job": job}
+                        for key, (count, http, job) in period.checkpoints.items()],
     }
 
 

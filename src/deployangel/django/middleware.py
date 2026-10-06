@@ -11,7 +11,7 @@ from django.core.signals import got_request_exception
 
 import deployangel
 from deployangel import http
-from deployangel.core import redaction
+from deployangel.core import redaction, work
 
 EXCEPTION = "_deployangel_exception"
 # Health checks served by django-health-check, django-alive, and
@@ -35,7 +35,11 @@ class DeployAngelMiddleware:
             return self.get_response(request)
         started = time.perf_counter()
         redaction.set_request_host(request.META.get("HTTP_HOST"))
-        response = self.get_response(request)
+        unit = work.begin(work.HTTP)
+        try:
+            response = self.get_response(request)
+        finally:
+            work.end(unit)
         _record(request, response, started)
         return response
 
@@ -44,7 +48,11 @@ class DeployAngelMiddleware:
             return await self.get_response(request)
         started = time.perf_counter()
         redaction.set_request_host(request.META.get("HTTP_HOST"))
-        response = await self.get_response(request)
+        unit = work.begin(work.HTTP)
+        try:
+            response = await self.get_response(request)
+        finally:
+            work.end(unit)
         _record(request, response, started)
         return response
 
