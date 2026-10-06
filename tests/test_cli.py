@@ -378,6 +378,18 @@ class TestMcp:
         server._scopes = None
         assert {"register_deployment", "wait_for_verification", "get_exception", "get_exercise_plan"} <= set(names())
 
+    def test_returns_every_tools_structured_content_as_an_object(self, server):
+        server.fake.scopes = ["verifications:read", "deployments"]
+        calls = {"get_verification": {}, "wait_for_verification": {"timeout_seconds": 1}, "get_exercise_plan": {},
+                 "list_deployments": {}, "get_exception": {"fingerprint": "abc"}, "list_late_regressions": {},
+                 "register_deployment": {"commit": "abc1234"}}
+        assert sorted(tool["name"] for tool in self.request(server, "tools/list")["result"]["tools"]) == sorted(calls)
+        for name, arguments in calls.items():
+            result = self.request(server, "tools/call", {"name": name, "arguments": arguments})["result"]
+            assert isinstance(result["structuredContent"], dict), f"{name} returned {type(result['structuredContent']).__name__}"
+        listed = self.request(server, "tools/call", {"name": "list_deployments", "arguments": {}})["result"]["structuredContent"]
+        assert listed == {"deployments": [{"id": 42}]}
+
     def test_waits_for_a_verdict_with_the_exit_codes_meaning(self, server):
         result = self.request(server, "tools/call", {"name": "wait_for_verification", "arguments": {"until": "verdict"}})["result"]
         assert result["isError"] is False

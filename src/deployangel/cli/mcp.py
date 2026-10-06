@@ -150,14 +150,15 @@ class Server:
                 content = self._wait_content(arguments)
             elif name == "get_exercise_plan":
                 content = self._plan_content(self._waiter().wait(self._target(arguments), wait=False))
+            # MCP requires structured content to be an object, never a bare list.
             elif name == "list_deployments":
-                content = self.client.deployments(limit=arguments.get("limit", 10))
+                content = {"deployments": self.client.deployments(limit=arguments.get("limit", 10))}
             elif name == "get_exception":
                 if "fingerprint" not in arguments:
                     raise ValueError("fingerprint is required")
                 content = self.client.exception(arguments["fingerprint"])
             elif name == "list_late_regressions":
-                content = self.client.late_regressions(since=arguments.get("since"), limit=arguments.get("limit", 10))
+                content = {"late_regressions": self.client.late_regressions(since=arguments.get("since"), limit=arguments.get("limit", 10))}
             elif name == "register_deployment":
                 if "deployments" not in self._token_scopes():
                     raise ValueError("register_deployment is not available for this token")

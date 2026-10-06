@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- The MCP tools `list_deployments` and `list_late_regressions` return their
+  lists inside an object (`{"deployments": [...]}`, `{"late_regressions":
+  [...]}`). MCP requires a tool's structured content to be an object, so
+  clients such as Claude Code rejected the bare lists before the agent saw
+  them.
+
 ## 0.1.1 (2026-10-06)
 
 - The package includes the `deployangel` command and MCP server, so Python
