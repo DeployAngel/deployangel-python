@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [ main ]
+
+jobs:
+  # The agent supports Python 3.10 and each framework's oldest listed version
+  # or later, so it runs on the oldest and newest of each.
+  test:
+    name: Python ${{ matrix.python }}, ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - python: "3.10"
+            name: oldest frameworks
+            packages: >-
+              django==4.2.* djangorestframework==3.14.* django-celery-beat==2.5.*
+              fastapi==0.100.* flask==2.3.* celery==5.3.* rq==1.16.* "httpx<0.28" "pytest-asyncio<1"
+          - python: "3.12"
+            name: current LTS releases
+            packages: >-
+              django==5.2.* djangorestframework django-celery-beat
+              fastapi flask celery rq httpx pytest-asyncio
+          - python: "3.14"
+            name: newest frameworks
+            packages: >-
+              django djangorestframework django-celery-beat
+              fastapi flask celery rq httpx pytest-asyncio
+    services:
+      redis:
+        image: redis:7
+        ports: [ "6379:6379" ]
+    env:
+      RQ_REDIS_URL: redis://localhost:6379/15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install
+        run: pip install -e . ${{ matrix.packages }} fakeredis redis pytest
+
+      - name: Run tests
+        run: pytest
+
+      - name: Check overhead
+        run: python bench/overhead.py
+
+  # The agent itself imports nothing outside the standard library.
+  no-frameworks:
+    name: Without any framework installed
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.10"
+      - run: pip install -e . pytest
+      - run: pytest tests/test_core.py tests/test_agent.py
+
+  package:
+    name: Build the package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+      - run: pip install build twine
+      - run: python -m build
+      - run: twine check --strict dist/*

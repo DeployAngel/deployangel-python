@@ -1,0 +1,52 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "deployangel"
+dynamic = ["version"]
+description = "DeployAngel agent for Django, FastAPI, and Flask: verifies every deploy from aggregated HTTP, job, and exception telemetry, including Celery and RQ jobs and Celery Beat schedules."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE.txt"]
+requires-python = ">=3.10"
+authors = [{ name = "Jordan Owens", email = "jordan@deployangel.com" }]
+keywords = ["deployment", "verification", "monitoring", "django", "fastapi", "flask", "celery"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Framework :: Django",
+  "Framework :: FastAPI",
+  "Framework :: Flask",
+  "Framework :: Celery",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Topic :: System :: Monitoring",
+]
+# No runtime dependencies: the agent uses the standard library only. The
+# extras only set the oldest framework versions it supports.
+dependencies = []
+
+[project.optional-dependencies]
+django = ["django>=4.2"]
+fastapi = ["fastapi>=0.100"]
+starlette = ["starlette>=0.27"]
+flask = ["flask>=2.3"]
+celery = ["celery>=5.3"]
+rq = ["rq>=1.16"]
+
+[project.urls]
+Homepage = "https://deployangel.com"
+Source = "https://github.com/DeployAngel/deployangel-python"
+Changelog = "https://github.com/DeployAngel/deployangel-python/blob/main/CHANGELOG.md"
+
+[tool.hatch.version]
+path = "src/deployangel/version.py"
+pattern = "VERSION = \"(?P<version>[^\"]+)\""
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/deployangel"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["tests"]
+asyncio_mode = "auto"

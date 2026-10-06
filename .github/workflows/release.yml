@@ -1,0 +1,50 @@
+name: Release
+
+# Pushing a version tag publishes a GitHub release whose notes are that
+# version's section of CHANGELOG.md. Publishing to PyPI is done by hand
+# (python -m build && twine upload dist/*) until trusted publishing is set up.
+on:
+  push:
+    tags: [ "v*" ]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Create release from CHANGELOG.md
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="${TAG#v}"
+
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            echo "A release for $TAG already exists."
+            exit 0
+          fi
+
+          # The lines under "## <version> (date)", up to the next heading,
+          # without leading or trailing blank lines.
+          awk -v v="$version" '
+            index($0, "## " v " ") == 1 { found = 1; next }
+            found && /^## / { exit }
+            found { lines[++n] = $0 }
+            END {
+              first = 1; while (first <= n && lines[first] == "") first++
+              last = n;  while (last >= first && lines[last] == "") last--
+              for (i = first; i <= last; i++) print lines[i]
+            }
+          ' CHANGELOG.md > notes.md
+
+          if [ ! -s notes.md ]; then
+            echo "::error::CHANGELOG.md has no section for $version."
+            exit 1
+          fi
+
+          gh release create "$TAG" --title "deployangel (Python) $version" --notes-file notes.md
