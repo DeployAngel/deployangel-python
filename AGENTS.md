@@ -41,6 +41,15 @@ integrations (`deployangel/django/`, `asgi.py`, `flask.py`, `celery.py`,
 speaks the same protocol. Protocol changes must work for both, and the
 DeployAngel cloud has to accept them first.
 
+## The deployangel command
+
+`deployangel.cli` is the command and MCP server for developers, CI, and
+coding agents. It talks only to DeployAngel's API, never imports a framework,
+and never starts the agent. It must match the Ruby gem's `deployangel`
+command: the same commands, options, text output, exit codes, and MCP tools.
+`tests/test_cli.py` is ported case for case from the gem's specs; change both
+together.
+
 ## Compatibility and tests
 
 - Supports Python 3.10, Django 4.2, FastAPI 0.100, Starlette 0.27, Flask 2.3,

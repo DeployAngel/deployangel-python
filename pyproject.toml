@@ -34,6 +34,11 @@ flask = ["flask>=2.3"]
 celery = ["celery>=5.3"]
 rq = ["rq>=1.16"]
 
+# The deployangel command and MCP server for developers, CI, and coding
+# agents. It talks only to DeployAngel's API and never starts the agent.
+[project.scripts]
+deployangel = "deployangel.cli:main"
+
 [project.urls]
 Homepage = "https://deployangel.com"
 Source = "https://github.com/DeployAngel/deployangel-python"

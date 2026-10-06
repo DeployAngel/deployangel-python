@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- The package includes the `deployangel` command and MCP server, so Python
+  projects no longer need the Ruby gem for them: `verify`, `status`, `plan`,
+  `release`, `check`, `exception`, `install kamal`, and `mcp`, with the same
+  options, output, and exit codes as the Ruby gem's command. `uvx deployangel
+  mcp` runs the MCP server without installing anything. Standard library
+  only, like the agent; the command never starts the agent.
+
 ## 0.1.0 (2026-10-06)
 
 - First release: the DeployAngel agent for Python, speaking Agent Protocol v1.

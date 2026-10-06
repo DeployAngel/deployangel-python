@@ -296,13 +296,49 @@ curl -fsS https://api.deployangel.com/api/v1/deployments \
   -d "{\"commit\": \"$GIT_SHA\"}"
 ```
 
-The `deployangel` command line tool and MCP server for coding agents
-(`deployangel verify --wait`) ship with the
-[Ruby gem](https://github.com/DeployAngel/deployangel-ruby) for now.
-`gem install deployangel` installs them; they need Ruby, but not Rails or
-your app. When a release isn't cleared yet, `deployangel plan` (or the MCP
-tool `get_exercise_plan`) says what to exercise against production so it
-clears sooner. It works the same for Django, FastAPI, and Flask routes.
+## Command line and coding agents
+
+The package includes the `deployangel` command (also `python -m deployangel`)
+and an MCP server for coding agents. They talk only to DeployAngel's API:
+they never start the agent or load your app, so they run anywhere the package
+is installed, or with nothing installed through `uvx deployangel`. Give them a
+token in `DEPLOYANGEL_API_TOKEN`: a "CLI & coding agents" token reads
+verdicts, and a "CI deploys" token can also register deploys and report
+checks.
+
+```bash
+deployangel verify --wait                   # current git HEAD, until a verdict
+deployangel verify --wait --until=initial   # return at the 15-minute initial check
+deployangel status                          # latest deployment
+deployangel plan                            # what to exercise so a release clears sooner
+deployangel release --commit=$SHA           # register a deploy (manual or CI)
+deployangel check --name="smoke: signup" --status=pass --covers=registration
+deployangel install kamal                   # a Kamal post-deploy hook that registers each deploy
+```
+
+Output is text on a terminal and JSON when piped (`--format=text|json`). Exit
+codes: 0 cleared, 1 failed, 2 not cleared, 3 still verifying or timed out, 4
+deployment not found, 5 usage, auth, or network error, 6 no problems so far
+at the initial check (not cleared), 7 warnings at the initial check. In
+GitHub Actions, `verify` also writes the verdict to the job's summary.
+
+For coding agents:
+
+```bash
+claude mcp add deployangel -- deployangel mcp        # or: -- uvx deployangel mcp
+```
+
+The tools are `get_verification`, `wait_for_verification`,
+`get_exercise_plan`, `list_deployments`, `get_exception`,
+`list_late_regressions`, and `register_deployment` when the token allows it.
+None of them can change production. When a release isn't cleared yet,
+`deployangel plan` (or `get_exercise_plan`) says what stands between it and
+clearance, and what to exercise against production so it clears sooner.
+Routes that change data are marked; use a test account for them, or ask
+first.
+
+The command and its output match the Ruby gem's `deployangel` command, so the
+docs and agent instructions for either apply to both.
 
 ## Development
 
