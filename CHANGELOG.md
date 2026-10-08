@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.5 (2026-10-08)
 
 - The agent finds the release in two more places, so fewer apps report it as
   unknown. After a `REVISION` file, it reads the commit from a git checkout
