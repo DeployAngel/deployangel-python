@@ -40,6 +40,10 @@ class Agent:
         self.environment = environment
         self.root = root
         self.release = release_module.resolve(config, env=env, root=root) if self.active else release_module.Release(None, None, "unknown")
+        # A REVISION file or setting that names no commit leaves the release as
+        # unknown as nothing at all, so the code fingerprint may name it too.
+        if self.release.unknown:
+            self.release.pending = True
         self.runtime = protocol.runtime(framework, framework_version)
         self.metadata = None
         self.capabilities = capabilities if capabilities is not None else ["http", "exceptions"]
@@ -49,9 +53,8 @@ class Agent:
         self._eager = eager
         self._warned: set = set()
         self._reset_process_state()
-        if self.active and self.release.unknown:
-            self._warn_once("unknown_release", "DeployAngel could not determine the release; set DEPLOYANGEL_REVISION "
-                            "or enable Heroku dyno metadata. Telemetry will not be attributed to deployments.")
+        if self.active and not self.release.pending:
+            self._warn_about_release()
         if self.active and eager:
             self.start_reporter()
 
@@ -133,8 +136,10 @@ class Agent:
         if not self.active:
             return 0
         try:
-            for period in self._aggregator.drain(include_current=include_current, max_periods=self.config.max_queued_payloads):
-                self._buffer.push(encode(protocol.telemetry(period, self.instance, self.release, self.runtime, self.capabilities)))
+            periods = self._aggregator.drain(include_current=include_current, max_periods=self.config.max_queued_payloads)
+            release = self._resolved_release() if periods else None
+            for period in periods:
+                self._buffer.push(encode(protocol.telemetry(period, self.instance, release, self.runtime, self.capabilities)))
             return self._send_buffered(deadline)
         except Exception as error:
             self._warn_once("flush", f"DeployAngel failed to flush telemetry: {type(error).__name__}: {error}")
@@ -179,7 +184,7 @@ class Agent:
             return
         try:
             base = {"protocol_version": protocol.VERSION, "instance": self.instance.to_protocol(),
-                    "release": self.release.to_protocol(), "runtime": self.runtime}
+                    "release": self._resolved_release().to_protocol(), "runtime": self.runtime}
             base.update(self.metadata.to_protocol())
             result = self._transport.post(METADATA_PATH, base)
             if not result.ok:
@@ -190,6 +195,34 @@ class Agent:
             self._metadata_sent = True
         except Exception as error:
             self._warn_once("metadata", f"DeployAngel failed to send application metadata: {type(error).__name__}: {error}")
+
+    def _resolved_release(self):
+        """The release for a payload. When nothing named it at boot, the code
+        fingerprint is computed here, once: from the reporter thread before its
+        first send, or the final flush at shutdown, never in a request or job.
+        It's the hash of the file digests the metadata sends, so the manifest
+        is built once for both."""
+        if not self.release.pending:
+            return self.release
+        with self._release_lock:
+            if self.release.pending:
+                manifest = None
+                try:
+                    if self.metadata is not None:
+                        manifest = self.metadata.file_manifest()
+                except Exception:
+                    manifest = None
+                self.release = release_module.code_fingerprint(manifest)
+                self._warn_about_release()
+        return self.release
+
+    def _warn_about_release(self) -> None:
+        if self.release.unknown:
+            self._warn_once("unknown_release", "DeployAngel could not determine the release; set DEPLOYANGEL_REVISION "
+                            "or enable Heroku dyno metadata. Telemetry will not be attributed to deployments.")
+        elif self.release.source == "code_fingerprint":
+            self._warn_once("code_fingerprint", "DeployAngel identifies releases by a fingerprint of the app's code. Set "
+                            "DEPLOYANGEL_REVISION to the deployed commit to see each release's commits and pull requests.")
 
     def _check_fork(self) -> None:
         # A fork the interpreter didn't see, such as uWSGI's, which forks
@@ -206,11 +239,19 @@ class Agent:
         self._metadata_sent = False
         self._thread: Optional[threading.Thread] = None
         self._thread_lock = threading.Lock()
+        # New in a child: one the parent's reporter held mid-fingerprint would
+        # never be released there.
+        self._release_lock = threading.Lock()
         self._stopping = threading.Event()
         self._jitter = random.uniform(*FLUSH_JITTER)
 
     def _run_reporter(self) -> None:
         try:
+            # Off the request path, so a process that exits within a minute or
+            # two doesn't build the fingerprint at shutdown instead. Only once
+            # the framework has attached the metadata it's built from.
+            if self.metadata is not None:
+                self._resolved_release()
             while not self._stopping.is_set():
                 if self._stopping.wait(self._seconds_until_next_flush()):
                     break

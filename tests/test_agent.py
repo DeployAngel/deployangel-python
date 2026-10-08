@@ -156,6 +156,148 @@ def test_sends_metadata_once_and_files_only_when_the_cloud_asks(fake_clock):
     assert "files" not in first[1] and second[1]["files"] == {}
 
 
+class Warnings:
+    def __init__(self):
+        self.messages = []
+
+    def warning(self, message, *args):
+        self.messages.append(message % args if args else message)
+
+
+def fingerprinted_agent(fake_clock, root, **options):
+    """An agent nothing names the release for, with metadata that counts how
+    often it builds the file manifest."""
+    from deployangel.metadata import Metadata
+
+    class CountingMetadata(Metadata):
+        builds = 0
+        threads: list = []
+
+        def _build_manifest(self):
+            CountingMetadata.builds += 1
+            CountingMetadata.threads.append(threading.current_thread().name)
+            return super()._build_manifest()
+
+    config = Configuration(env={})
+    config.update(token="da_test", logger=Warnings(), **options)
+    agent = Agent(config=config, environment="production", root=str(root), env={}, transport=FakeTransport(), clock=fake_clock)
+    agent.metadata = CountingMetadata(config, str(root), "production")
+    return agent, CountingMetadata
+
+
+def test_fingerprints_the_code_before_the_first_send_not_at_boot(fake_clock, tmp_path):
+    (tmp_path / "app.py").write_text("print('hi')\n")
+    agent, metadata = fingerprinted_agent(fake_clock, tmp_path)
+    assert agent.release.pending and metadata.builds == 0
+    # The first request starts the reporter, which fingerprints the code in
+    # the background; the request itself never does.
+    agent.record_request("GET /", 200, 1)
+    assert threading.current_thread().name not in metadata.threads
+
+    agent.send_metadata()
+    fake_clock.advance(60)
+    agent.flush()
+    expected = {"version": "code:" + agent.metadata.file_manifest()["hash"][:12], "commit": None, "source": "code_fingerprint"}
+    (_, metadata_payload), (_, telemetry) = agent._transport.posts
+    assert metadata_payload["release"] == expected and telemetry["release"] == expected
+    fake_clock.advance(60)
+    agent.flush()
+    assert metadata.builds == 1
+    assert agent.config.logger.messages == [
+        "DeployAngel identifies releases by a fingerprint of the app's code. Set DEPLOYANGEL_REVISION to the "
+        "deployed commit to see each release's commits and pull requests."]
+
+
+def test_the_reporter_fingerprints_the_code_as_soon_as_it_starts(fake_clock, tmp_path):
+    (tmp_path / "app.py").write_text("print('hi')\n")
+    agent, metadata = fingerprinted_agent(fake_clock, tmp_path)
+    agent.start_reporter()
+    try:
+        deadline = time.monotonic() + 2
+        while agent.release.pending and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert metadata.threads == ["deployangel-reporter"]
+        assert agent.release.source == "code_fingerprint"
+    finally:
+        agent._stopping.set()
+
+
+def test_the_reporter_waits_for_the_metadata_when_it_starts_first(fake_clock, tmp_path):
+    (tmp_path / "app.py").write_text("print('hi')\n")
+    agent, metadata = fingerprinted_agent(fake_clock, tmp_path)
+    attached, agent.metadata = agent.metadata, None
+    agent.start_reporter()
+    try:
+        time.sleep(0.05)
+        assert agent.release.pending
+        agent.metadata = attached
+        agent.record_request("GET /", 200, 1)
+        fake_clock.advance(60)
+        agent.flush()
+        assert agent._transport.posts[-1][1]["release"]["source"] == "code_fingerprint"
+    finally:
+        agent._stopping.set()
+
+
+def test_a_revision_file_that_names_no_commit_falls_back_to_the_fingerprint(fake_clock, tmp_path):
+    (tmp_path / "app.py").write_text("print('hi')\n")
+    (tmp_path / "REVISION").write_text("\n")
+    agent, _ = fingerprinted_agent(fake_clock, tmp_path)
+    assert agent._resolved_release().source == "code_fingerprint"
+
+
+def test_the_fingerprint_is_computed_once_across_threads(fake_clock, tmp_path):
+    (tmp_path / "app.py").write_text("print('hi')\n")
+    agent, metadata = fingerprinted_agent(fake_clock, tmp_path)
+    threads = [threading.Thread(target=agent._resolved_release) for _ in range(8)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert metadata.builds == 1 and agent.release.source == "code_fingerprint"
+
+
+def test_without_file_digests_the_release_is_unknown_and_says_so_once_resolved(fake_clock, tmp_path):
+    (tmp_path / "app.py").write_text("print('hi')\n")
+    agent, _ = fingerprinted_agent(fake_clock, tmp_path, file_digests=False)
+    assert agent.config.logger.messages == []
+    fake_clock.advance(60)
+    agent.flush()
+    assert agent._transport.telemetry()[0]["release"] == {"version": None, "commit": None, "source": "unknown"}
+    assert len(agent.config.logger.messages) == 1 and "could not determine the release" in agent.config.logger.messages[0]
+
+
+def test_without_metadata_the_release_is_unknown(fake_clock, tmp_path):
+    agent, _ = fingerprinted_agent(fake_clock, tmp_path)
+    agent.metadata = None
+    agent.shutdown()
+    assert agent._transport.telemetry()[0]["release"]["source"] == "unknown"
+
+
+def test_the_shutdown_flush_fingerprints_a_process_that_never_sent(fake_clock, tmp_path):
+    (tmp_path / "app.py").write_text("print('hi')\n")
+    agent, _ = fingerprinted_agent(fake_clock, tmp_path)
+    agent.record_request("GET /", 200, 1)
+    agent.shutdown()
+    assert agent._transport.telemetry()[0]["release"]["source"] == "code_fingerprint"
+
+
+def test_a_forked_child_never_waits_on_the_parents_fingerprint_lock(fake_clock, tmp_path):
+    (tmp_path / "app.py").write_text("print('hi')\n")
+    agent, _ = fingerprinted_agent(fake_clock, tmp_path)
+    agent._release_lock.acquire()  # held by the parent's reporter when it forked
+    agent.after_fork()
+    assert agent._resolved_release().source == "code_fingerprint"
+
+
+def test_a_named_release_skips_the_fingerprint(fake_clock, tmp_path):
+    agent, metadata = fingerprinted_agent(fake_clock, tmp_path, revision="abc1234")
+    assert not agent.release.pending
+    fake_clock.advance(60)
+    agent.flush()
+    assert metadata.builds == 0 and agent._transport.telemetry()[0]["release"]["source"] == "config"
+
+
 def test_shutdown_sends_the_minute_in_progress(fake_clock):
     agent = make_agent(fake_clock)
     agent.record_request("GET /", 200, 1)

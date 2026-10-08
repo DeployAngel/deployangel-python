@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+- The agent finds the release in two more places, so fewer apps report it as
+  unknown. After a `REVISION` file, it reads the commit from a git checkout
+  (source `git_head`): `.git` in the app's root or up to 3 directories above
+  it, following worktrees and packed refs, without running `git`. After ECS,
+  it falls back to a code fingerprint (source `code_fingerprint`): `code:`
+  and the first 12 characters of the hash of the file digests it already
+  sends, computed in the reporter thread as soon as it starts rather than at
+  boot. It logs a warning suggesting `DEPLOYANGEL_REVISION`: without a commit
+  DeployAngel shows which files changed in a release, but not its commits and
+  pull requests. With file digests off the release stays unknown.
+- `deployangel install docker` bakes the commit into a Docker image: it adds
+  `ARG GIT_SHA` and `ENV DEPLOYANGEL_REVISION=$GIT_SHA` at the end of the
+  Dockerfile's last stage, before `CMD` and `ENTRYPOINT`, so earlier layers
+  stay cached, and prints the `--build-arg` to pass. It never edits CI
+  workflows.
+
 ## 0.1.4 (2026-10-06)
 
 - Checkpoints report whether they were recorded while handling an HTTP request

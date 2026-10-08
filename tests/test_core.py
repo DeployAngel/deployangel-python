@@ -328,7 +328,116 @@ def test_release_reads_ecs_image_tags_and_digests():
 
 
 def test_release_is_unknown_without_any_source():
-    assert resolve({}).to_protocol() == {"version": None, "commit": None, "source": "unknown"}
+    resolved = resolve({})
+    assert resolved.to_protocol() == {"version": None, "commit": None, "source": "unknown"}
+    # The code fingerprint is tried later, off the boot path.
+    assert resolved.pending
+
+
+def test_a_blank_build_arg_revision_counts_as_unset(tmp_path):
+    # `docker build` without --build-arg GIT_SHA leaves DEPLOYANGEL_REVISION="".
+    (tmp_path / "REVISION").write_text("abcdef1\n")
+    config = Configuration(env={"DEPLOYANGEL_REVISION": "", "DEPLOYANGEL_RELEASE_VERSION": " "})
+    assert release.resolve(config, env={}, root=str(tmp_path)).source == "revision_file"
+
+
+SHA = "0123456789abcdef0123456789abcdef01234567"
+OTHER_SHA = "89abcdef0123456789abcdef0123456789abcdef"
+
+
+def git_checkout(path, head="ref: refs/heads/main\n", refs=None, packed=None):
+    git = path / ".git"
+    (git / "refs" / "heads").mkdir(parents=True)
+    (git / "HEAD").write_text(head)
+    for name, sha in (refs or {}).items():
+        (git / name).parent.mkdir(parents=True, exist_ok=True)
+        (git / name).write_text(sha + "\n")
+    if packed is not None:
+        (git / "packed-refs").write_text(packed)
+    return git
+
+
+def test_release_reads_a_detached_git_head(tmp_path):
+    git_checkout(tmp_path, head=SHA.upper() + "\n")
+    assert release.resolve(Configuration(env={}), env={}, root=str(tmp_path)).to_protocol() == \
+        {"version": None, "commit": SHA, "source": "git_head"}
+
+
+def test_git_head_follows_a_branch_to_its_ref_file_or_packed_refs(tmp_path):
+    loose, packed = tmp_path / "loose", tmp_path / "packed"
+    git_checkout(loose, refs={"refs/heads/main": SHA})
+    git_checkout(packed, packed=f"# pack-refs with: peeled fully-peeled sorted\n{OTHER_SHA} refs/heads/feature\n"
+                                f"^{SHA}\n{SHA} refs/heads/main\n")
+    assert release.git_head(str(loose)) == SHA
+    assert release.git_head(str(packed)) == SHA
+
+
+def test_git_head_follows_a_gitdir_file_and_commondir(tmp_path):
+    # A worktree: .git is a file naming its own directory inside the main
+    # repository, whose branches are in the common directory.
+    main = git_checkout(tmp_path / "main", refs={"refs/heads/feature": SHA})
+    worktree_git = main / "worktrees" / "feature"
+    worktree_git.mkdir(parents=True)
+    (worktree_git / "HEAD").write_text("ref: refs/heads/feature\n")
+    (worktree_git / "commondir").write_text("../..\n")
+    app = tmp_path / "feature"
+    app.mkdir()
+    (app / ".git").write_text("gitdir: ../main/.git/worktrees/feature\n")
+    assert release.git_head(str(app)) == SHA
+
+    # An absolute gitdir, with branches only in packed-refs.
+    (main / "refs" / "heads" / "feature").unlink()
+    (main / "packed-refs").write_text(f"{SHA} refs/heads/feature\n")
+    (app / ".git").write_text(f"gitdir: {worktree_git}\n")
+    assert release.git_head(str(app)) == SHA
+
+
+def test_git_head_looks_up_to_three_parent_directories(tmp_path):
+    git_checkout(tmp_path, refs={"refs/heads/main": SHA})
+    near = tmp_path / "a" / "b" / "c"
+    too_far = near / "d"
+    too_far.mkdir(parents=True)
+    assert release.git_head(str(near)) == SHA
+    assert release.git_head(str(too_far)) is None
+
+
+def test_git_head_ignores_unsafe_and_malformed_refs(tmp_path):
+    # A commit-shaped file outside the repository is never read.
+    (tmp_path / "escape").mkdir()
+    (tmp_path / "escape" / "secret").write_text(SHA)
+    for name, head in (("escape", "ref: refs/../../secret\n"), ("outside", "ref: HEAD\n"),
+                       ("missing", "ref: refs/heads/gone\n"), ("garbage", "not a commit\n")):
+        git_checkout(tmp_path / name, head=head)
+        assert release.git_head(str(tmp_path / name)) in (None, "not a commit")
+        resolved = release.resolve(Configuration(env={}), env={}, root=str(tmp_path / name))
+        assert (resolved.source, resolved.pending) == ("unknown", True)
+    (tmp_path / "pointer").mkdir()
+    (tmp_path / "pointer" / ".git").write_text("nonsense\n")
+    assert release.git_head(str(tmp_path / "pointer")) is None
+    assert release.git_head(str(tmp_path / "nowhere")) is None
+
+
+def test_git_head_comes_after_the_revision_file_and_before_ecs(tmp_path):
+    git_checkout(tmp_path, refs={"refs/heads/main": SHA})
+    ecs = {"ECS_CONTAINER_METADATA_URI_V4": "http://169.254.170.2/v4"}
+    image = lambda uri: '{"Image": "shop:abcdef1"}'  # noqa: E731
+    assert release.resolve(Configuration(env={}), env=ecs, root=str(tmp_path), http=image).source == "git_head"
+    (tmp_path / "REVISION").write_text("abcdef2\n")
+    assert release.resolve(Configuration(env={}), env=ecs, root=str(tmp_path), http=image).source == "revision_file"
+
+
+def test_code_fingerprint_is_the_file_manifests_hash():
+    manifest = {"hash": "ab" * 32, "count": 3, "truncated": False, "files": {}}
+    assert release.code_fingerprint(manifest).to_protocol() == \
+        {"version": "code:abababababab", "commit": None, "source": "code_fingerprint"}
+
+
+def test_code_fingerprint_needs_a_complete_manifest():
+    for manifest in (None, {"hash": None, "count": 0, "truncated": False, "files": {}},
+                     {"hash": "ab" * 32, "count": 20_000, "truncated": True, "files": {}},
+                     {"hash": "ab" * 32, "count": 0, "truncated": False, "files": {}}):
+        fingerprinted = release.code_fingerprint(manifest)
+        assert (fingerprinted.source, fingerprinted.unknown, fingerprinted.pending) == ("unknown", True, False)
 
 
 # Configuration

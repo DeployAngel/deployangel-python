@@ -104,12 +104,26 @@ The agent must know which release it's running. It finds it in this order:
 6. Railway: `RAILWAY_GIT_COMMIT_SHA`, or `RAILWAY_DEPLOYMENT_ID`
 7. Coolify: `SOURCE_COMMIT`. Dokku: `GIT_REV`
 8. a `REVISION` file in the app's root
-9. ECS, including Fargate: the container's image, from the metadata endpoint ECS
-   provides (one local request at boot)
+9. a git checkout: the commit `HEAD` names, read from `.git` in the app's root
+   or up to 3 directories above it, without running `git`. This covers servers
+   deployed by `git pull`, Fabric, or Ansible
+10. ECS, including Fargate: the container's image, from the metadata endpoint ECS
+    provides (one local request at boot)
+11. a code fingerprint: `code:` and the first 12 characters of the hash of the
+    file digests the agent already sends (below), with no commit. The same
+    code gives the same fingerprint, so a redeploy of unchanged code isn't a
+    new release. It's computed in the background when the reporter starts, not
+    at boot, and needs file digests on. Without a commit DeployAngel still
+    shows which files changed in a release, but not its commits and pull
+    requests, so the agent logs a warning: set `DEPLOYANGEL_REVISION` when
+    you can
 
-For other Docker deploys, bake the commit into the image with
-`ARG GIT_SHA` and `ENV DEPLOYANGEL_REVISION=$GIT_SHA`. On DigitalOcean App
-Platform, set `DEPLOYANGEL_REVISION: ${_self.COMMIT_HASH}` in the app spec.
+For other Docker deploys, bake the commit into the image:
+`deployangel install docker` adds `ARG GIT_SHA` and
+`ENV DEPLOYANGEL_REVISION=$GIT_SHA` to the end of your Dockerfile, where it
+doesn't invalidate cached layers, and you build with
+`--build-arg GIT_SHA=$(git rev-parse HEAD)`. On DigitalOcean App Platform, set
+`DEPLOYANGEL_REVISION: ${_self.COMMIT_HASH}` in the app spec.
 
 ## What it sends
 
@@ -320,6 +334,7 @@ deployangel plan                            # what to exercise so a release clea
 deployangel release --commit=$SHA           # register a deploy (manual or CI)
 deployangel check --name="smoke: signup" --status=pass --covers=registration
 deployangel install kamal                   # a Kamal post-deploy hook that registers each deploy
+deployangel install docker                  # bake the commit into the image as DEPLOYANGEL_REVISION
 ```
 
 Output is text on a terminal and JSON when piped (`--format=text|json`). Exit

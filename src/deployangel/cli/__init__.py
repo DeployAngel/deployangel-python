@@ -37,7 +37,8 @@ HELP = f"""Usage: deployangel <command> [options]
   exception  Details for a fingerprint      deployangel exception FINGERPRINT
   check      Report a smoke test result     --name=NAME --status=pass|fail [--covers=a,b]
                                             [--commit=SHA | --deployment=ID] [--details-url=URL]
-  install    Add a deploy hook              deployangel install kamal
+  install    Add a Kamal deploy hook, or    deployangel install kamal
+             bake the commit into an image  deployangel install docker
   mcp        Run the MCP server over stdio (for coding agents)
 
 With no target, verify, plan, and check use the current git HEAD commit.
@@ -59,6 +60,22 @@ KAMAL_HOOK = """#!/bin/sh
 deployangel release || true
 """
 KAMAL_HOOK_LINE = "deployangel release || true"
+
+# Added at the end of the Dockerfile's last stage: a value that changes with
+# every commit invalidates the cache of every layer after it, so it goes
+# after the dependency installs.
+DOCKERFILE_LINES = """# The commit this image runs, for DeployAngel. Build with --build-arg GIT_SHA=$(git rev-parse HEAD).
+ARG GIT_SHA
+ENV DEPLOYANGEL_REVISION=$GIT_SHA
+"""
+DOCKER_BUILD_HELP = """Pass the commit when you build the image:
+
+  docker build --build-arg GIT_SHA=$(git rev-parse HEAD) .
+  fly deploy --build-arg GIT_SHA=$(git rev-parse HEAD)
+  GitHub Actions (docker/build-push-action):
+    build-args: GIT_SHA=${{ github.sha }}
+
+Kamal apps don't need this: DeployAngel reads Kamal's KAMAL_VERSION."""
 
 
 class UsageError(Exception):
@@ -216,11 +233,16 @@ class CLI:
         return 0
 
     def install(self) -> int:
+        target = self.argv.pop(0) if self.argv else None
+        if target == "docker":
+            return self._install_docker()
+        if target != "kamal":
+            return self._usage_error("install needs a target: deployangel install kamal, or deployangel install docker")
+        return self._install_kamal()
+
+    def _install_kamal(self) -> int:
         """Writes .kamal/hooks/post-deploy, or says what to add to a hook that
         already exists, rather than overwriting it."""
-        target = self.argv.pop(0) if self.argv else None
-        if target != "kamal":
-            return self._usage_error("install needs a target: deployangel install kamal")
         relative = os.path.join(".kamal", "hooks", "post-deploy")
         path = os.path.join(self.root, relative)
         if os.path.exists(path):
@@ -236,6 +258,24 @@ class CLI:
         os.chmod(path, os.stat(path).st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
         self._print(f"Created {relative}. Each `kamal deploy` now registers its release with DeployAngel.\n"
                     'Set DEPLOYANGEL_API_TOKEN (a "CI deploys" token) wherever you run kamal deploy.')
+        return 0
+
+    def _install_docker(self) -> int:
+        """Bakes the commit into the image as DEPLOYANGEL_REVISION, from a build
+        argument. It never edits CI workflows; it says what to pass instead."""
+        path = os.path.join(self.root, "Dockerfile")
+        try:
+            with open(path) as file:
+                dockerfile = file.read()
+        except FileNotFoundError:
+            self._error(f"no Dockerfile in {self.root}; run this where your Dockerfile is")
+            return USAGE_ERROR
+        if "DEPLOYANGEL_REVISION" in dockerfile:
+            self._print("Dockerfile already sets DEPLOYANGEL_REVISION.")
+            return 0
+        with open(path, "w") as file:
+            file.write(_add_revision(dockerfile))
+        self._print("Added DEPLOYANGEL_REVISION to the Dockerfile's last stage. " + DOCKER_BUILD_HELP)
         return 0
 
     def mcp(self) -> int:
@@ -315,6 +355,37 @@ def _duration(value: str) -> int:
     if not match:
         raise UsageError(f"invalid argument: --timeout={value}")
     return int(match.group(1)) * {None: 1, "s": 1, "m": 60, "h": 3600}[match.group(2)]
+
+
+def _add_revision(dockerfile: str) -> str:
+    """Inserts DOCKERFILE_LINES in the last stage, just before the CMD and
+    ENTRYPOINT instructions that end it, or at the end of the file."""
+    lines = dockerfile.splitlines(keepends=True)
+    # (first line, instruction) for each instruction, joining continued lines.
+    instructions = []
+    continued = False
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if continued:
+            continued = stripped.endswith("\\")
+            continue
+        if not stripped or stripped.startswith("#"):
+            continue
+        instructions.append((index, stripped.split(None, 1)[0].upper()))
+        continued = stripped.endswith("\\")
+    insert_at = None
+    for index, keyword in reversed(instructions):
+        if keyword not in ("CMD", "ENTRYPOINT"):
+            break
+        insert_at = index
+    # A comment just above CMD describes it, so it stays with it.
+    while insert_at is not None and insert_at > 0 and lines[insert_at - 1].strip().startswith("#"):
+        insert_at -= 1
+    if insert_at is None:
+        if lines and not lines[-1].endswith("\n"):
+            lines[-1] += "\n"
+        return "".join(lines) + ("\n" if lines and lines[-1].strip() else "") + DOCKERFILE_LINES
+    return "".join(lines[:insert_at]) + DOCKERFILE_LINES + "\n" + "".join(lines[insert_at:])
 
 
 def _isatty(stream) -> bool:

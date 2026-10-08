@@ -284,6 +284,59 @@ def test_install_kamal_leaves_an_existing_hook_alone(io_streams, tmp_path):
     assert "already exists. Add this line to it:" in stdout.getvalue()
 
 
+REVISION_LINES = ("# The commit this image runs, for DeployAngel. Build with --build-arg GIT_SHA=$(git rev-parse HEAD).\n"
+                  "ARG GIT_SHA\nENV DEPLOYANGEL_REVISION=$GIT_SHA\n")
+
+
+def test_install_docker_adds_the_revision_before_the_last_stages_cmd(io_streams, tmp_path):
+    stdout, stderr = io_streams
+    dockerfile = tmp_path / "Dockerfile"
+    dockerfile.write_text('FROM python:3.13 AS build\nRUN pip install -r requirements.txt\nCMD ["build"]\n\n'
+                          'FROM python:3.13-slim\nCOPY --from=build /app /app\nEXPOSE 8000\n\n'
+                          '# Start the server\nENTRYPOINT ["tini", "--"]\nCMD ["gunicorn", \\\n  "app.wsgi"]\n')
+    assert CLI(["install", "docker"], stdout=stdout, stderr=stderr, root=str(tmp_path)).run() == 0
+    assert dockerfile.read_text() == (
+        'FROM python:3.13 AS build\nRUN pip install -r requirements.txt\nCMD ["build"]\n\n'
+        'FROM python:3.13-slim\nCOPY --from=build /app /app\nEXPOSE 8000\n\n'
+        + REVISION_LINES + '\n# Start the server\nENTRYPOINT ["tini", "--"]\nCMD ["gunicorn", \\\n  "app.wsgi"]\n')
+    out = stdout.getvalue()
+    for text in ("docker build --build-arg GIT_SHA=$(git rev-parse HEAD) .", "fly deploy --build-arg GIT_SHA=$(git rev-parse HEAD)",
+                 "build-args: GIT_SHA=${{ github.sha }}", "Kamal apps don't need this"):
+        assert text in out
+
+
+def test_install_docker_appends_when_the_last_stage_has_no_cmd(io_streams, tmp_path):
+    stdout, stderr = io_streams
+    dockerfile = tmp_path / "Dockerfile"
+    dockerfile.write_text('FROM python:3.13\nCMD ["early"]\nFROM python:3.13-slim\nRUN pip install gunicorn')
+    assert CLI(["install", "docker"], stdout=stdout, stderr=stderr, root=str(tmp_path)).run() == 0
+    assert dockerfile.read_text() == 'FROM python:3.13\nCMD ["early"]\nFROM python:3.13-slim\nRUN pip install gunicorn\n\n' + REVISION_LINES
+
+
+def test_install_docker_is_idempotent(io_streams, tmp_path):
+    stdout, stderr = io_streams
+    dockerfile = tmp_path / "Dockerfile"
+    dockerfile.write_text('FROM python:3.13\nCMD ["gunicorn"]\n')
+    assert CLI(["install", "docker"], stdout=stdout, stderr=stderr, root=str(tmp_path)).run() == 0
+    installed = dockerfile.read_text()
+    assert CLI(["install", "docker"], stdout=stdout, stderr=stderr, root=str(tmp_path)).run() == 0
+    assert dockerfile.read_text() == installed and installed.count("DEPLOYANGEL_REVISION") == 1
+    assert "Dockerfile already sets DEPLOYANGEL_REVISION." in stdout.getvalue()
+
+
+def test_install_docker_needs_a_dockerfile(io_streams, tmp_path):
+    stdout, stderr = io_streams
+    assert CLI(["install", "docker"], stdout=stdout, stderr=stderr, root=str(tmp_path)).run() == 5
+    assert f"deployangel: no Dockerfile in {tmp_path}" in stderr.getvalue()
+    assert not (tmp_path / "Dockerfile").exists()
+
+
+def test_install_needs_a_known_target(io_streams):
+    stdout, stderr = io_streams
+    assert CLI(["install", "heroku"], stdout=stdout, stderr=stderr).run() == 5
+    assert "deployangel install kamal, or deployangel install docker" in stderr.getvalue()
+
+
 def test_reports_usage_and_auth_problems_with_exit_5(run, io_streams):
     assert run("verify", "--until=never", client=FakeClient()) == 5
     assert run("check", "--name=x", client=FakeClient()) == 5
