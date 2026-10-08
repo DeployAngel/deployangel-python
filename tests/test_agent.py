@@ -222,6 +222,23 @@ def test_the_reporter_fingerprints_the_code_as_soon_as_it_starts(fake_clock, tmp
         agent._stopping.set()
 
 
+def test_an_eager_agent_given_its_metadata_at_start_fingerprints_right_away(fake_clock, tmp_path):
+    from deployangel.metadata import Metadata
+
+    (tmp_path / "app.py").write_text("print('hi')\n")
+    config = Configuration(env={})
+    config.update(token="da_test", logger=Warnings())
+    agent = Agent(config=config, environment="production", root=str(tmp_path), env={}, transport=FakeTransport(),
+                  clock=fake_clock, eager=True, metadata=Metadata(config, str(tmp_path), "production"))
+    try:
+        deadline = time.monotonic() + 2
+        while agent.release.pending and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert agent.release.source == "code_fingerprint"
+    finally:
+        agent._stopping.set()
+
+
 def test_the_reporter_waits_for_the_metadata_when_it_starts_first(fake_clock, tmp_path):
     (tmp_path / "app.py").write_text("print('hi')\n")
     agent, metadata = fingerprinted_agent(fake_clock, tmp_path)

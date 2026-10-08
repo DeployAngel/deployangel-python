@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- The agent gets its file digests when it starts, so the reporter works out
+  the code fingerprint right away rather than at its first send, a minute or
+  two later. A file changed in between, as by an in-place `git pull`, no
+  longer ends up in the fingerprint of code that isn't running.
+
 ## 0.1.5 (2026-10-08)
 
 - The agent finds the release in two more places, so fewer apps report it as

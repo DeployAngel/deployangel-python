@@ -34,7 +34,8 @@ SEEN = "__deployangel_recorded__"
 class Agent:
     def __init__(self, config, environment: str, root: Optional[str] = None, framework: Optional[str] = None,
                  framework_version: Optional[str] = None, env: Mapping[str, str] = os.environ, transport=None,
-                 clock: Callable[[], float] = time.time, eager: bool = False, capabilities: Optional[list] = None):
+                 clock: Callable[[], float] = time.time, eager: bool = False, capabilities: Optional[list] = None,
+                 metadata=None):
         self.config = config
         self.active = config.is_active(environment)
         self.environment = environment
@@ -45,7 +46,7 @@ class Agent:
         if self.release.unknown:
             self.release.pending = True
         self.runtime = protocol.runtime(framework, framework_version)
-        self.metadata = None
+        self.metadata = metadata
         self.capabilities = capabilities if capabilities is not None else ["http", "exceptions"]
         self._transport = transport or Transport(config)
         self._env = env

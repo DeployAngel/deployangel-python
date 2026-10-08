@@ -65,12 +65,16 @@ def start(environment: Optional[str] = None, root: Optional[str] = None, framewo
                 return _agent
             config = configuration()
             environment = config.environment or environment or ("development" if debug else "production")
-            _agent = Agent(config=config, environment=environment, root=config.root or root or os.getcwd(),
-                           framework=framework, framework_version=framework_version,
-                           eager=server_process() if eager is None else eager, capabilities=_capabilities)
+            root = config.root or root or os.getcwd()
             from deployangel.metadata import Metadata
 
-            _agent.metadata = Metadata(config=config, root=_agent.root, environment=environment, sources=_metadata_sources)
+            # The metadata goes in at start, before the reporter thread can run:
+            # the code fingerprint is built from its file digests.
+            metadata = Metadata(config=config, root=root, environment=environment, sources=_metadata_sources)
+            _agent = Agent(config=config, environment=environment, root=root,
+                           framework=framework, framework_version=framework_version,
+                           eager=server_process() if eager is None else eager, capabilities=_capabilities,
+                           metadata=metadata)
             _install_process_hooks()
             return _agent
     except Exception as error:
