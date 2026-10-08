@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.6 (2026-10-08)
 
 - The agent gets its file digests when it starts, so the reporter works out
   the code fingerprint right away rather than at its first send, a minute or
