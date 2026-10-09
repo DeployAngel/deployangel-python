@@ -22,6 +22,9 @@ INTERVAL = 0.2  # about 5 requests a second
 TIMEOUT = 10
 # Stop when the app isn't answering, rather than send the rest into it.
 MAX_CONSECUTIVE_ERRORS = 5
+# A route table can list pages an app doesn't serve, like the edit page of a
+# resource that has none. One answer like this is enough to know.
+NOT_SERVED = (404, 405, 410)
 # Rails' :id and *path, Django's <int:pk>, FastAPI's {id}.
 PARAMETER = re.compile(r"/[:*{<]")
 
@@ -95,26 +98,43 @@ class Exerciser:
         return targets, skipped
 
     def run(self, exercise_plan: dict) -> Result:
+        """A route whose first request says it isn't served gets no more; its
+        share goes to the routes that answered."""
         targets, skipped = self.plan(exercise_plan)
-        result = Result(skipped=skipped)
-        errors_in_a_row = 0
+        self._statuses, self._sent, self._errors_in_a_row = {}, 0, 0
+        leftover, answered = 0, []
         for target in targets:
-            statuses = {}
-            for _ in range(target.count):
-                if errors_in_a_row >= MAX_CONSECUTIVE_ERRORS:
+            for i in range(target.count):
+                if self._unreachable():
                     break
-                if result.sent:
-                    self.sleeper(INTERVAL)
-                status = self.requester(self.url_for(target.path))
-                result.sent += 1
-                kind = f"{status // 100}xx" if status else "error"
-                statuses[kind] = statuses.get(kind, 0) + 1
-                errors_in_a_row = errors_in_a_row + 1 if kind == "error" else 0
-            requests = sum(statuses.values())
-            if requests:
-                result.routes.append({"key": target.key, "requests": requests, "statuses": statuses})
-        result.unreachable = errors_in_a_row >= MAX_CONSECUTIVE_ERRORS
-        return result
+                status = self._send(target)
+                if i == 0 and status in NOT_SERVED:
+                    leftover += target.count - 1
+                    break
+            if {"2xx", "3xx"} & set(self._statuses.get(target.key, {})):
+                answered.append(target)
+        if answered:
+            for i in range(leftover):
+                if self._unreachable():
+                    break
+                self._send(answered[i % len(answered)])
+        routes = [{"key": target.key, "requests": sum(self._statuses[target.key].values()), "statuses": self._statuses[target.key]}
+                  for target in targets if target.key in self._statuses]
+        return Result(routes=routes, skipped=skipped, sent=self._sent, unreachable=self._unreachable())
+
+    def _send(self, target: Target) -> Optional[int]:
+        if self._sent:
+            self.sleeper(INTERVAL)
+        status = self.requester(self.url_for(target.path))
+        self._sent += 1
+        kind = f"{status // 100}xx" if status else "error"
+        statuses = self._statuses.setdefault(target.key, {})
+        statuses[kind] = statuses.get(kind, 0) + 1
+        self._errors_in_a_row = self._errors_in_a_row + 1 if kind == "error" else 0
+        return status
+
+    def _unreachable(self) -> bool:
+        return self._errors_in_a_row >= MAX_CONSECUTIVE_ERRORS
 
     def url_for(self, path: str) -> str:
         return urllib.parse.urlunsplit((self.base.scheme, self.base.netloc, self.base.path.rstrip("/") + path, "", ""))

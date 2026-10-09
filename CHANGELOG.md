@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- `deployangel exercise` stops requesting a page after its first 404, 405,
+  or 410, since a route table can list pages an app doesn't serve, and sends
+  that page's share to the pages that answered.
+
 ## 0.1.8 (2026-10-09)
 
 - `deployangel exercise --url=<production URL>` sends a release's exercise

@@ -627,6 +627,23 @@ def test_exercise_sends_the_plans_read_only_requests_spreads_the_shortfall_and_r
         assert text in out
 
 
+def test_exercise_stops_requesting_a_page_the_app_doesnt_serve(io_streams, clock):
+    stdout, stderr = io_streams
+    client = FakeClient([_exercise_document()])
+    sent = []
+
+    def requester(url):
+        sent.append(url)
+        return 404 if url.endswith("/about/") else 200
+
+    CLI(["exercise", "--url=https://shop.example.com"], env={}, stdout=stdout, stderr=stderr, client=client, sleeper=clock.advance,
+        clock=clock, git_head="81ac27d0000", requester=requester).run()
+    assert {url: sent.count(url) for url in set(sent)} == {"https://shop.example.com/products/": 17, "https://shop.example.com/about/": 1}
+    routes = next(call for call in client.calls if call[0] == "exercise")[2]["routes"]
+    assert routes == [{"key": "GET /products/", "requests": 17, "statuses": {"2xx": 17}},
+                      {"key": "GET /about/", "requests": 1, "statuses": {"4xx": 1}}]
+
+
 def test_exercise_sends_nothing_on_a_dry_run_and_caps_requests(io_streams, clock):
     client = FakeClient([_exercise_document()])
     code, sent = _exercise(io_streams, clock, "--url=https://shop.example.com", "--dry-run", "--max-requests=5", client=client)

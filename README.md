@@ -384,8 +384,9 @@ it requests the plan's GET routes that have no path parameters, spreading any
 request shortfall across them (at most 200 requests, about 5 a second, as
 `DeployAngel-Exercise`), then records what it sent on the release, where the
 page lists it under "Exercised from your side". It skips and names routes
-that change data or need a path parameter. `--dry-run` shows what it would
-send.
+that change data or need a path parameter, and stops requesting a page after
+its first 404, sending its share to the pages that answered. `--dry-run`
+shows what it would send.
 
 The command and its output match the Ruby gem's `deployangel` command, so the
 docs and agent instructions for either apply to both.
