@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.10 (2026-10-09)
 
 - Work scheduled outside the app's own scheduler is watched too.
   `recurring_jobs` declares it by the name it runs under (a task,
