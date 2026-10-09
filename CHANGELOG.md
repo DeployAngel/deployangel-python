@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.7 (2026-10-09)
 
 - `deployangel install agents` sets up Claude Code, Cursor, and Codex in a
   project: the MCP server in `.mcp.json`, `.cursor/mcp.json`, and
