@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.9 (2026-10-09)
 
 - `deployangel exercise` stops requesting a page after its first 404, 405,
   or 410, since a route table can list pages an app doesn't serve, and sends
