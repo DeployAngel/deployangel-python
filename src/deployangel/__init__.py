@@ -16,9 +16,10 @@ from typing import Optional
 
 from deployangel.agent import Agent
 from deployangel.config import Configuration
+from deployangel.scheduled import task
 from deployangel.version import VERSION
 
-__all__ = ["VERSION", "checkpoint", "configuration", "configure", "notify", "recording", "shutdown", "start"]
+__all__ = ["VERSION", "checkpoint", "configuration", "configure", "notify", "recording", "shutdown", "start", "task"]
 
 # Web servers and job workers report from boot, so idle processes still send
 # heartbeats; other processes (manage.py commands, shells) only report after
@@ -70,6 +71,9 @@ def start(environment: Optional[str] = None, root: Optional[str] = None, framewo
 
             # The metadata goes in at start, before the reporter thread can run:
             # the code fingerprint is built from its file digests.
+            from deployangel.scheduled import ConfiguredSchedules
+
+            add_metadata_source(ConfiguredSchedules(config))
             metadata = Metadata(config=config, root=root, environment=environment, sources=_metadata_sources)
             _agent = Agent(config=config, environment=environment, root=root,
                            framework=framework, framework_version=framework_version,

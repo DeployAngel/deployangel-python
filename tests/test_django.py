@@ -4,6 +4,12 @@ django = pytest.importorskip("django")
 
 from django.conf import settings  # noqa: E402
 
+try:
+    import django_crontab  # noqa: F401
+    CRONTAB_APPS = ["django_crontab"]
+except ImportError:
+    CRONTAB_APPS = []
+
 if not settings.configured:
     settings.configure(
         DEBUG=False,
@@ -11,7 +17,9 @@ if not settings.configured:
         ALLOWED_HOSTS=["*"],
         ROOT_URLCONF="django_app.urls",
         INSTALLED_APPS=["django.contrib.contenttypes", "django.contrib.auth", "rest_framework", "django_celery_beat",
-                        "deployangel.django"],
+                        *CRONTAB_APPS, "deployangel.django"],
+        CRONJOBS=[("30 3 * * *", "django_app.cron.nightly_cleanup", [5]), ("0 * * * *", "django_app.cron.failing_job"),
+                  ("15 4 * * 1", "django.core.management.call_command", ["clearsessions"])],
         MIDDLEWARE=["django.middleware.common.CommonMiddleware"],
         DATABASES={"default": {"ENGINE": "django.db.backends.sqlite3", "NAME": ":memory:"}},
         USE_TZ=True,
@@ -136,3 +144,55 @@ def test_reads_django_celery_beat_periodic_tasks(agent):
     assert schedules["sync"] == {"key": "sync", "class": "shop.tasks.sync", "source": "django_celery_beat",
                                  "time_zone": "America/New_York", "schedule": None, "every": "600s"}
     assert "off" not in schedules
+
+
+# Scheduled work outside Celery: django-crontab and management commands
+
+def test_reads_django_crontab_jobs_as_schedules_in_the_servers_zone(agent, monkeypatch):
+    pytest.importorskip("django_crontab")
+    from deployangel.django.scheduled import DjangoCrontab
+
+    monkeypatch.setenv("TZ", "UTC")
+    assert DjangoCrontab().schedules() == [
+        {"key": "django_app.cron.nightly_cleanup", "class": "django_app.cron.nightly_cleanup", "schedule": "30 3 * * *",
+         "source": "django_crontab", "time_zone": "UTC"},
+        {"key": "django_app.cron.failing_job", "class": "django_app.cron.failing_job", "schedule": "0 * * * *",
+         "source": "django_crontab", "time_zone": "UTC"},
+        {"key": "manage.py clearsessions", "class": "manage.py clearsessions", "schedule": "15 4 * * 1",
+         "source": "django_crontab", "time_zone": "UTC"},
+    ]
+
+
+def test_records_each_run_of_a_django_crontab_job_the_way_it_calls_them(agent):
+    pytest.importorskip("django_crontab")
+    import importlib
+
+    from django_app import cron
+
+    from deployangel.django import scheduled
+
+    scheduled.install([])
+    scheduled.install([])  # wraps once
+    # django-crontab looks the function up by name when the job runs.
+    module = importlib.import_module("django_app.cron")
+    assert getattr(module, "nightly_cleanup")(limit=5) == 5
+    with pytest.raises(RuntimeError):
+        getattr(module, "failing_job")()
+    jobs = {entry["key"]: entry for entry in drain(agent)["job_classes"]}
+    assert (jobs["django_app.cron.nightly_cleanup"]["processed"], jobs["django_app.cron.nightly_cleanup"]["failed"]) == (1, 0)
+    assert jobs["django_app.cron.failing_job"]["failed"] == 1
+    assert cron.ran == [5]
+
+
+def test_records_management_commands_a_schedule_names_and_no_others(agent, monkeypatch):
+    from django.core.management import call_command
+
+    from deployangel.django import scheduled
+
+    monkeypatch.setattr(scheduled, "_scheduled_commands", set())
+    scheduled.install([{"class": "manage.py check"}])
+    call_command("check")
+    call_command("diffsettings")
+    jobs = {entry["key"] for entry in drain(agent)["job_classes"]}
+    assert "manage.py check" in jobs
+    assert "manage.py diffsettings" not in jobs

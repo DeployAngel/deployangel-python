@@ -45,6 +45,12 @@ class Configuration:
         self.critical_flows: dict = {}
         # Route keys as the dashboard shows them, such as "GET /healthz/".
         self.ignored_routes: list = []
+        # Work scheduled outside the app's own scheduler (cron, Heroku
+        # Scheduler, a Kubernetes CronJob), by the name it runs under: a task,
+        # "manage.py <command>", or a deployangel.task() name. Each schedule is
+        # a cron line or words like "every day at 4am", optionally ending in a
+        # time zone.
+        self.recurring_jobs: dict = {}
 
     def update(self, **options) -> None:
         for name, value in options.items():

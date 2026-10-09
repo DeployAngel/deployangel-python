@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+- Work scheduled outside the app's own scheduler is watched too.
+  `recurring_jobs` declares it by the name it runs under (a task,
+  `"manage.py <command>"`, or a `deployangel.task` name) with a cron line or
+  words like `"every day at 4am"`, for cron, Heroku Scheduler, or a
+  Kubernetes CronJob.
+- `deployangel.task("name")`, as a `with` block or a decorator, records
+  plain code that a scheduler starts as a run of that name, with its
+  duration and whether it raised.
+- Django management commands a schedule names are recorded with no code
+  change.
+- django-crontab's `CRONJOBS` setting is read: each job is expected on its
+  schedule in the server's zone, and its runs are recorded.
+
 ## 0.1.9 (2026-10-09)
 
 - `deployangel exercise` stops requesting a page after its first 404, 405,

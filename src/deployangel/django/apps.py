@@ -21,13 +21,17 @@ class DeployAngelConfig(AppConfig):
                 deployangel.configure(**options)
             install_middleware()
 
-            from deployangel.django import metadata, middleware
+            from deployangel.django import metadata, middleware, scheduled
 
             middleware.connect_signals()
             deployangel.add_metadata_source(metadata.DjangoRoutes())
+            deployangel.add_metadata_source(scheduled.DjangoCrontab())
             _install_job_integrations()
-            deployangel.start(framework="django", framework_version=django.get_version(),
-                              debug=bool(getattr(settings, "DEBUG", False)))
+            agent = deployangel.start(framework="django", framework_version=django.get_version(),
+                                      debug=bool(getattr(settings, "DEBUG", False)))
+            # Only where the agent reports: nothing is wrapped in development.
+            if agent is not None and deployangel.recording():
+                scheduled.install(agent.metadata.schedules())
         except Exception as error:
             deployangel.configuration().logger.warning("DeployAngel failed to start: %s: %s", type(error).__name__, error)
 

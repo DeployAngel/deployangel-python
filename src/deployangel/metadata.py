@@ -40,11 +40,14 @@ class Metadata:
             "routes": self.routes(),
             "job_classes": sorted(set(self._collect("job_classes"))),
             "job_class_files": self.job_class_files(),
-            "schedules": self._collect("schedules"),
+            "schedules": self.schedules(),
             "critical_flows": {str(name): [str(item) for item in (items if isinstance(items, (list, tuple)) else [items])]
                                for name, items in (self.config.critical_flows or {}).items()},
             "file_manifest": {key: manifest[key] for key in ("hash", "count", "truncated")},
         }
+
+    def schedules(self) -> list:
+        return self._collect("schedules")
 
     def files(self) -> dict:
         return self.file_manifest()["files"]

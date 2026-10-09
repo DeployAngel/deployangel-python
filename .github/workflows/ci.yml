@@ -18,17 +18,17 @@ jobs:
           - python: "3.10"
             name: oldest frameworks
             packages: >-
-              django==4.2.* djangorestframework==3.14.* django-celery-beat==2.5.*
+              django==4.2.* djangorestframework==3.14.* django-celery-beat==2.5.* django-crontab
               fastapi==0.100.* flask==2.3.* celery==5.3.* rq==1.16.* "httpx<0.28" "pytest-asyncio<1"
           - python: "3.12"
             name: current LTS releases
             packages: >-
-              django==5.2.* djangorestframework django-celery-beat
+              django==5.2.* djangorestframework django-celery-beat django-crontab
               fastapi flask celery rq httpx pytest-asyncio
           - python: "3.14"
             name: newest frameworks
             packages: >-
-              django djangorestframework django-celery-beat
+              django djangorestframework django-celery-beat django-crontab
               fastapi flask celery rq httpx pytest-asyncio
     services:
       redis:
@@ -65,7 +65,7 @@ jobs:
         with:
           python-version: "3.10"
       - run: pip install -e . pytest
-      - run: pytest tests/test_core.py tests/test_agent.py
+      - run: pytest tests/test_core.py tests/test_agent.py tests/test_scheduled.py
 
   package:
     name: Build the package

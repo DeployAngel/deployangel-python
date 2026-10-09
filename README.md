@@ -262,6 +262,44 @@ its enabled periodic tasks. Solar schedules aren't read, and neither are
 RQ's schedulers, whose jobs live only in Redis. DeployAngel also learns
 recurring jobs from their history.
 
+#### Cron, Heroku Scheduler, and django-crontab
+
+Work that something outside the app starts on a schedule, such as cron,
+Heroku Scheduler, or a Kubernetes CronJob, is invisible to Celery Beat.
+Declare it by the name it runs under, with a cron line or words like
+`"every day at 4am"`, in the server's time zone unless you add one
+(`"0 3 * * * America/New_York"`):
+
+```python
+DEPLOYANGEL = {
+    "recurring_jobs": {
+        "shop.tasks.send_receipts": "0 3 * * *",            # a Celery or RQ task
+        "manage.py send_invoices": "every day at 4am",      # python manage.py send_invoices
+        "nightly import": "30 2 * * *",                     # deployangel.task("nightly import")
+    },
+}
+```
+
+- **A task** is recorded wherever it runs.
+- **A Django management command** named `"manage.py <command>"` is recorded
+  with no code change.
+- **Any other code** is recorded when you wrap it. Exceptions are recorded
+  and re-raised:
+
+  ```python
+  with deployangel.task("nightly import"):
+      run_import()
+
+  @deployangel.task("nightly import")
+  def run_import(): ...
+  ```
+
+[django-crontab](https://github.com/kraiz/django-crontab)'s `CRONJOBS`
+setting is read automatically when `django_crontab` is installed: each job is
+expected on its schedule in the server's zone, and its runs are recorded with
+no change to the job (a job that calls `call_command` is recorded as
+`manage.py <command>`).
+
 ## Checkpoints
 
 Errors and latency don't catch work that silently stops happening. Count the
