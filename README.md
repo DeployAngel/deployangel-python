@@ -331,6 +331,7 @@ deployangel verify --wait                   # current git HEAD, until a verdict
 deployangel verify --wait --until=initial   # return at the 15-minute initial check
 deployangel status                          # latest deployment
 deployangel plan                            # what to exercise so a release clears sooner
+deployangel exercise --url=https://example.com  # send the plan's read-only requests to production
 deployangel release --commit=$SHA           # register a deploy (manual or CI)
 deployangel check --name="smoke: signup" --status=pass --covers=registration
 deployangel install kamal                   # a Kamal post-deploy hook that registers each deploy
@@ -378,7 +379,13 @@ None of them can change production. When a release isn't cleared yet,
 clearance, and what to exercise against production so it clears sooner.
 It separates what clearance waits on from changed and rarely used paths
 that are only worth running. Routes that change data are marked; use a test account for them, or ask
-first.
+first. `deployangel exercise --url=<production URL>` does the read-only part:
+it requests the plan's GET routes that have no path parameters, spreading any
+request shortfall across them (at most 200 requests, about 5 a second, as
+`DeployAngel-Exercise`), then records what it sent on the release, where the
+page lists it under "Exercised from your side". It skips and names routes
+that change data or need a path parameter. `--dry-run` shows what it would
+send.
 
 The command and its output match the Ruby gem's `deployangel` command, so the
 docs and agent instructions for either apply to both.

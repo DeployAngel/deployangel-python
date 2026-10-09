@@ -60,6 +60,10 @@ class FakeClient:
         self.calls.append(("check", reference, attributes))
         return {"id": 1, "status": attributes["status"], "deployment_id": 42}
 
+    def record_exercise(self, deployment_id, **attributes):
+        self.calls.append(("exercise", deployment_id, attributes))
+        return {"id": 1, "deployment_id": deployment_id}
+
     def exception(self, fingerprint):
         return {"fingerprint": fingerprint, "exception_class": "NoMethodError", "backtrace": []}
 
@@ -575,3 +579,74 @@ class TestMcp:
         output = io.StringIO()
         Server(FakeClient(), input=input, output=output, error_output=io.StringIO()).run()
         assert [json.loads(line) for line in output.getvalue().splitlines()] == [{"jsonrpc": "2.0", "id": 1, "result": {}}]
+
+
+def _exercise_document():
+    plan = exercise_plan()
+    plan["items"] = plan["items"] + [
+        {"kind": "route", "key": "GET /products/", "runs": 1, "runs_needed": 3, "mutating": False},
+        {"kind": "route", "key": "GET /about/", "runs": 0, "mutating": False},
+        {"kind": "route", "key": "GET /items/{item_id}", "runs": 0, "mutating": False},
+    ]
+    return dict(verdict_document("observing"), exercise_plan=plan)
+
+
+def _exercise(io_streams, clock, *argv, client, answer=200):
+    stdout, stderr = io_streams
+    sent = []
+
+    def requester(url):
+        sent.append(url)
+        return answer
+
+    code = CLI(["exercise", *argv], env={}, stdout=stdout, stderr=stderr, client=client, sleeper=clock.advance, clock=clock,
+               git_head="81ac27d0000", requester=requester).run()
+    return code, sent
+
+
+def test_exercise_sends_the_plans_read_only_requests_spreads_the_shortfall_and_records_them(io_streams, clock):
+    client = FakeClient([_exercise_document()])
+    code, sent = _exercise(io_streams, clock, "--url=https://shop.example.com/", client=client)
+    assert code == 0
+    # 12 of 30 requests: 18 more, 2 + 1 of them by the routes' own runs needed.
+    assert {url: sent.count(url) for url in set(sent)} == {"https://shop.example.com/products/": 10, "https://shop.example.com/about/": 8}
+    _, deployment_id, attributes = next(call for call in client.calls if call[0] == "exercise")
+    assert deployment_id == 42
+    assert attributes["routes"] == [
+        {"key": "GET /products/", "requests": 10, "statuses": {"2xx": 10}},
+        {"key": "GET /about/", "requests": 8, "statuses": {"2xx": 8}},
+    ]
+    assert attributes["skipped"] == [
+        {"key": "GET /orders/<int:pk>/", "reason": "needs a path parameter"},
+        {"key": "POST /password_resets/", "reason": "changes data"},
+        {"key": "GET /items/{item_id}", "reason": "needs a path parameter"},
+    ]
+    out = io_streams[0].getvalue()
+    for text in ("Sent 18 requests to https://shop.example.com/", "GET /products/ ×10: 10 2xx",
+                 "POST /password_resets/ (changes data)", "Recorded on the release."):
+        assert text in out
+
+
+def test_exercise_sends_nothing_on_a_dry_run_and_caps_requests(io_streams, clock):
+    client = FakeClient([_exercise_document()])
+    code, sent = _exercise(io_streams, clock, "--url=https://shop.example.com", "--dry-run", "--max-requests=5", client=client)
+    assert code == 0 and sent == []
+    assert not any(call[0] == "exercise" for call in client.calls)
+    assert "Would send 5 requests:" in io_streams[0].getvalue()
+
+
+def test_exercise_stops_when_the_app_doesnt_answer(io_streams, clock):
+    from deployangel.cli.exerciser import MAX_CONSECUTIVE_ERRORS
+
+    code, sent = _exercise(io_streams, clock, "--url=https://shop.example.com", client=FakeClient([_exercise_document()]), answer=None)
+    assert code == 5 and len(sent) == MAX_CONSECUTIVE_ERRORS
+    assert "Stopped early: https://shop.example.com isn't answering." in io_streams[0].getvalue()
+
+
+def test_exercise_sends_nothing_without_a_plan_and_needs_the_url(io_streams, clock):
+    cleared = dict(verdict_document("closed", "verified"), exercise_plan={"status": "nothing_needed", "summary": "Cleared."})
+    code, sent = _exercise(io_streams, clock, "--url=https://shop.example.com", client=FakeClient([cleared]))
+    assert code == 0 and sent == [] and "Nothing to exercise. Cleared." in io_streams[0].getvalue()
+
+    code, _ = _exercise(io_streams, clock, "--url=shop.example.com", client=FakeClient([_exercise_document()]))
+    assert code == 5 and "exercise needs --url" in io_streams[1].getvalue()

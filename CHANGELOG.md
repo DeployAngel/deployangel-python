@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- `deployangel exercise --url=<production URL>` sends a release's exercise
+  plan's read-only requests (GET routes without path parameters, at most
+  200, about 5 a second) so a quiet release can clear sooner, then records
+  what it sent on the release, which lists it as exercised from your side.
+  It skips and names routes that change data or need a path parameter.
+  `--dry-run` shows what it would send.
+- The agent instructions `deployangel install agents` writes now tell the
+  agent to run `deployangel exercise` when a release isn't cleared yet.
+
 ## 0.1.7 (2026-10-09)
 
 - `deployangel install agents` sets up Claude Code, Cursor, and Codex in a

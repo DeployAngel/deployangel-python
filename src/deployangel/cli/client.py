@@ -62,6 +62,11 @@ class Client:
         body = {"name": name, "status": status, "covers": list(covers), "details_url": details_url}
         return self._post(f"/api/v1/deployments/{urllib.parse.quote(reference, safe='')}/checks", _compact(body))
 
+    def record_exercise(self, deployment_id, routes: list, skipped: list, ran_at: str) -> dict:
+        """What `deployangel exercise` sent (spec §16, Exercise records). A
+        "CLI & coding agents" token may record one: it only labels the release."""
+        return self._post(f"/api/v1/deployments/{deployment_id}/exercises", {"routes": routes, "skipped": skipped, "ran_at": ran_at})
+
     def _get(self, path: str, params: Optional[dict] = None) -> Any:
         url = f"{self.endpoint}{path}"
         params = _compact(params or {})

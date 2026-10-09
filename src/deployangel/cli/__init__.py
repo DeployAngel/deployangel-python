@@ -34,6 +34,8 @@ HELP = f"""Usage: deployangel <command> [options]
   status     Latest deployment and its verification
   plan       What to exercise so a release  [--commit=SHA | --version=V | --deployment=ID]
              clears sooner                  [--format=text|json]
+  exercise   Send the plan's read-only      --url=PRODUCTION_URL [--commit=SHA | --version=V | --deployment=ID]
+             requests to production         [--max-requests=200] [--dry-run]
   exception  Details for a fingerprint      deployangel exception FINGERPRINT
   check      Report a smoke test result     --name=NAME --status=pass|fail [--covers=a,b]
                                             [--commit=SHA | --deployment=ID] [--details-url=URL]
@@ -90,10 +92,11 @@ verdict: call the `wait_for_verification` MCP tool with the commit and
   production without explicit approval.
 - Exit 3: still verifying; run the command again.
 - Not cleared yet: call `get_exercise_plan` (or `{command} plan`).
-  If its status is "exercisable" or "waiting_for_activity", say what it lists
-  and offer to exercise it: read-only routes freely, routes marked mutating
-  only with a test account or after asking. If the status is "warm_up",
-  nothing run can clear it.
+  If its status is "exercisable" or "waiting_for_activity", run
+  `{command} exercise --url=<production URL>`: it sends the
+  plan's read-only requests and records them on the release. Offer to
+  exercise what it skips: routes that change data only with a test account
+  or after asking. If the status is "warm_up", nothing run can clear it.
 {AGENTS_END}
 """
 
@@ -134,7 +137,7 @@ class _Parser(argparse.ArgumentParser):
 class CLI:
     def __init__(self, argv, env: Optional[Mapping[str, str]] = None, stdin=None, stdout=None, stderr=None,
                  client=None, sleeper: Callable[[float], None] = time.sleep, clock: Callable[[], float] = time.time,
-                 git_head=None, root: Optional[str] = None):
+                 git_head=None, root: Optional[str] = None, requester=None):
         self.argv = list(argv)
         self.env = os.environ if env is None else env
         self.stdin = stdin or sys.stdin
@@ -146,11 +149,12 @@ class CLI:
         # None looks the commit up with git; False means there is none.
         self._git_head = git_head
         self.root = root or os.getcwd()
+        self.requester = requester
 
     def run(self) -> int:
         command = self.argv.pop(0) if self.argv else None
         commands = {"release": self.release, "verify": self.verify, "status": lambda: self.verify(status=True),
-                    "plan": self.plan, "exception": self.exception, "check": self.check, "install": self.install,
+                    "plan": self.plan, "exercise": self.exercise, "exception": self.exception, "check": self.check, "install": self.install,
                     "mcp": self.mcp}
         try:
             if command in commands:
@@ -240,6 +244,59 @@ class CLI:
         data = {"deployment": document.get("deployment"), "exercise_plan": document.get("exercise_plan")}
         self._output(data, options["format"], lambda: formatter.exercise_plan(document))
         return 0
+
+    def exercise(self) -> int:
+        """Sends the plan's read-only requests from here, then records what it
+        sent on the release (spec §16, Exercise records)."""
+        from datetime import datetime, timezone
+
+        from deployangel.cli.exerciser import MAX_REQUESTS, Exerciser
+
+        parser = self._parser([("--url",), ("--commit",), ("--version",), ("--deployment", "deployment_id")])
+        parser.add_argument("--max-requests", dest="max_requests", type=int, default=MAX_REQUESTS)
+        parser.add_argument("--dry-run", dest="dry_run", action="store_true")
+        options = vars(parser.parse_args(self.argv))
+        if not re.match(r"\Ahttps?://[^/\s]+", options["url"] or ""):
+            return self._usage_error("exercise needs --url, the app's production URL, like https://example.com")
+        target = self._target(options)
+        if not target:
+            return self._usage_error("no target: pass --commit, --version, or --deployment, or run inside a git repository")
+
+        outcome = Waiter(self.client(), sleeper=self.sleeper, clock=self.clock).wait(target, wait=False)
+        if outcome.not_found:
+            self._error(f"no deployment found for {next(iter(target.values()))}")
+            return outcome.exit_code
+        document = outcome.document
+        plan = document.get("exercise_plan") or {}
+        if plan.get("status") not in ("exercisable", "waiting_for_activity"):
+            self._print(f"Nothing to exercise. {plan.get('summary') or ''}".rstrip())
+            return 0
+
+        exerciser = Exerciser(options["url"], max_requests=min(max(options["max_requests"], 1), MAX_REQUESTS),
+                              sleeper=self.sleeper, requester=self.requester)
+        if options["dry_run"]:
+            targets, skipped = exerciser.plan(plan)
+            lines = [f"Would send {sum(t.count for t in targets)} requests:"]
+            lines += [f"  {exerciser.url_for(t.path)} ×{t.count}" for t in targets]
+            if skipped:
+                lines += ["Skipped:"] + [f"  {s['key']} ({s['reason']})" for s in skipped]
+            self._print("\n".join(lines))
+            return 0
+
+        result = exerciser.run(plan)
+        lines = [f"Sent {result.sent} requests to {options['url']}:"]
+        lines += [f"  {r['key']} ×{r['requests']}: " + ", ".join(f"{n} {kind}" for kind, n in r["statuses"].items()) for r in result.routes]
+        if result.skipped:
+            lines += ["Skipped:"] + [f"  {s['key']} ({s['reason']})" for s in result.skipped]
+        if result.unreachable:
+            lines.append(f"Stopped early: {options['url']} isn't answering.")
+        if result.routes:
+            ran_at = datetime.fromtimestamp(self.clock(), tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            self.client().record_exercise((document.get("deployment") or {}).get("id"), routes=result.routes,
+                                          skipped=result.skipped, ran_at=ran_at)
+            lines.append("Recorded on the release. Wait for the verdict with: deployangel verify --wait")
+        self._print("\n".join(lines))
+        return USAGE_ERROR if result.unreachable else 0
 
     def exception(self) -> int:
         if not self.argv or self.argv[0].startswith("-"):
