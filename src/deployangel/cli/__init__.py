@@ -37,8 +37,9 @@ HELP = f"""Usage: deployangel <command> [options]
   exception  Details for a fingerprint      deployangel exception FINGERPRINT
   check      Report a smoke test result     --name=NAME --status=pass|fail [--covers=a,b]
                                             [--commit=SHA | --deployment=ID] [--details-url=URL]
-  install    Add a Kamal deploy hook, or    deployangel install kamal
-             bake the commit into an image  deployangel install docker
+  install    Add a Kamal deploy hook,       deployangel install kamal
+             bake the commit into an image, deployangel install docker
+             or set up coding agents        deployangel install agents
   mcp        Run the MCP server over stdio (for coding agents)
 
 With no target, verify, plan, and check use the current git HEAD commit.
@@ -60,6 +61,47 @@ KAMAL_HOOK = """#!/bin/sh
 deployangel release || true
 """
 KAMAL_HOOK_LINE = "deployangel release || true"
+
+# The block `deployangel install agents` keeps in AGENTS.md (and CLAUDE.md
+# when it doesn't import AGENTS.md), replaced whole on each run.
+AGENTS_START = "<!-- deployangel:start -->"
+AGENTS_END = "<!-- deployangel:end -->"
+
+
+def agent_instructions(command: str) -> str:
+    return f"""{AGENTS_START}
+## Production verification (DeployAngel)
+
+After deploying, or pushing a commit that deploys, wait for DeployAngel's
+verdict: call the `wait_for_verification` MCP tool with the commit and
+`until: "initial"`, calling again while it's in progress, or run
+`{command} verify --commit=<sha> --wait --until=initial`.
+
+- Exit 0 / verified: the release is cleared. Report the clearance line and
+  anything DeployAngel is still watching, then move on.
+- Exit 6: no problems so far, but NOT cleared. Report "no problems so far, not
+  yet cleared" and the expected clearance time. DeployAngel keeps verifying and
+  alerts on failure.
+- Exit 7: warnings at the initial check. Report them and review the findings.
+  The release is NOT cleared.
+- Exit 2 / inconclusive: the release is NOT verified. Do not claim success.
+- Exit 1 / failed: read the findings and exceptions (`get_exception`),
+  investigate the likely cause, and propose a fix. Do not roll back or change
+  production without explicit approval.
+- Exit 3: still verifying; run the command again.
+- Not cleared yet: call `get_exercise_plan` (or `{command} plan`).
+  If its status is "exercisable" or "waiting_for_activity", say what it lists
+  and offer to exercise it: read-only routes freely, routes marked mutating
+  only with a test account or after asking. If the status is "warm_up",
+  nothing run can clear it.
+{AGENTS_END}
+"""
+
+
+AGENTS_TOKEN_HELP = """The MCP server and CLI need DEPLOYANGEL_API_TOKEN, a "CLI & coding agents" token
+from the app's Settings, in the environment your agent runs in (for example in
+an .envrc with direnv). Never put it in these files: they're meant to be committed.
+Codex reads .codex/config.toml only in projects you've marked as trusted."""
 
 # Added at the end of the Dockerfile's last stage: a value that changes with
 # every commit invalidates the cache of every layer after it, so it goes
@@ -236,9 +278,113 @@ class CLI:
         target = self.argv.pop(0) if self.argv else None
         if target == "docker":
             return self._install_docker()
+        if target == "agents":
+            return self._install_agents()
         if target != "kamal":
-            return self._usage_error("install needs a target: deployangel install kamal, or deployangel install docker")
+            return self._usage_error("install needs a target: deployangel install kamal, docker, or agents")
         return self._install_kamal()
+
+    def _install_agents(self) -> int:
+        """Sets up Claude Code, Cursor, and Codex in this project: the MCP
+        server in each one's project config, and instructions to wait for a
+        verdict after deploying. Never overwrites what's there: an existing
+        entry is kept, and a file it can't read is left for you to edit."""
+        command = self._project_command() + ["mcp"]
+        lines = [
+            self._install_json_mcp(".mcp.json", command, "Claude Code"),
+            self._install_json_mcp(os.path.join(".cursor", "mcp.json"), command, "Cursor"),
+            self._install_codex_mcp(command),
+            *self._install_agent_instructions(" ".join(command[:-1])),
+        ]
+        self._print("\n".join(lines) + "\n\n" + AGENTS_TOKEN_HELP)
+        return 0
+
+    def _project_command(self) -> list:
+        """How an agent runs this project's deployangel: through uv or Poetry
+        when the project uses one, since it's installed in their environment."""
+        if os.path.exists(os.path.join(self.root, "uv.lock")):
+            return ["uv", "run", "deployangel"]
+        if os.path.exists(os.path.join(self.root, "poetry.lock")):
+            return ["poetry", "run", "deployangel"]
+        return ["deployangel"]
+
+    def _install_json_mcp(self, relative: str, command: list, agent: str) -> str:
+        path = os.path.join(self.root, relative)
+        exists = os.path.exists(path)
+        try:
+            config = {}
+            if exists:
+                with open(path) as file:
+                    config = json.load(file)
+            if not isinstance(config, dict):
+                raise ValueError("not a JSON object")
+        except ValueError:
+            return (f"Couldn't read {relative}, so it's unchanged. Add a \"deployangel\" server to its mcpServers: "
+                    f"command \"{command[0]}\", args {json.dumps(command[1:], separators=(',', ':'))}.")
+        servers = config.setdefault("mcpServers", {})
+        if "deployangel" in servers:
+            return f"{relative} already has a deployangel MCP server ({agent})."
+        servers["deployangel"] = {"command": command[0], "args": command[1:]}
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        with open(path, "w") as file:
+            file.write(json.dumps(config, indent=2) + "\n")
+        return f"{'Updated' if exists else 'Created'} {relative}: the DeployAngel MCP server for {agent}."
+
+    def _install_codex_mcp(self, command: list) -> str:
+        relative = os.path.join(".codex", "config.toml")
+        path = os.path.join(self.root, relative)
+        existing = None
+        if os.path.exists(path):
+            with open(path) as file:
+                existing = file.read()
+        if existing is not None and "[mcp_servers.deployangel]" in existing:
+            return f"{relative} already has a deployangel MCP server (Codex)."
+        table = ("[mcp_servers.deployangel]\n"
+                 f"command = {json.dumps(command[0])}\n"
+                 f"args = {json.dumps(command[1:])}\n"
+                 'env_vars = ["DEPLOYANGEL_API_TOKEN", "DEPLOYANGEL_URL"]\n')
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as file:
+            file.write(existing.rstrip("\n") + "\n\n" + table if existing is not None else table)
+        return f"{'Updated' if existing is not None else 'Created'} {relative}: the DeployAngel MCP server for Codex."
+
+    def _install_agent_instructions(self, command: str) -> list:
+        """AGENTS.md serves Codex and Cursor. Claude Code reads CLAUDE.md, so it
+        gets the block too, unless it already imports AGENTS.md; a project
+        without one gets a CLAUDE.md that does."""
+        block = agent_instructions(command)
+        lines = [self._upsert_instructions("AGENTS.md", block)]
+        claude = os.path.join(self.root, "CLAUDE.md")
+        if not os.path.exists(claude):
+            with open(claude, "w") as file:
+                file.write("@AGENTS.md\n")
+            lines.append("Created CLAUDE.md, which imports AGENTS.md for Claude Code.")
+        else:
+            with open(claude) as file:
+                imports = re.search(r"^@AGENTS\.md\s*$", file.read(), re.MULTILINE)
+            if not imports:
+                lines.append(self._upsert_instructions("CLAUDE.md", block))
+        return lines
+
+    def _upsert_instructions(self, relative: str, block: str) -> str:
+        path = os.path.join(self.root, relative)
+        if not os.path.exists(path):
+            with open(path, "w") as file:
+                file.write(block)
+            return f"Created {relative} with instructions to wait for DeployAngel's verdict after deploying."
+        with open(path) as file:
+            content = file.read()
+        pattern = re.compile(re.escape(AGENTS_START) + r".*?" + re.escape(AGENTS_END) + r"\n?", re.DOTALL)
+        if pattern.search(content):
+            updated = pattern.sub(lambda _: block, content, count=1)
+            if updated == content:
+                return f"{relative} already has DeployAngel's instructions."
+            with open(path, "w") as file:
+                file.write(updated)
+            return f"Updated DeployAngel's instructions in {relative}."
+        with open(path, "w") as file:
+            file.write(content.rstrip("\n") + "\n\n" + block)
+        return f"Added instructions to wait for DeployAngel's verdict after deploying to {relative}."
 
     def _install_kamal(self) -> int:
         """Writes .kamal/hooks/post-deploy, or says what to add to a hook that

@@ -334,7 +334,89 @@ def test_install_docker_needs_a_dockerfile(io_streams, tmp_path):
 def test_install_needs_a_known_target(io_streams):
     stdout, stderr = io_streams
     assert CLI(["install", "heroku"], stdout=stdout, stderr=stderr).run() == 5
-    assert "deployangel install kamal, or deployangel install docker" in stderr.getvalue()
+    assert "deployangel install kamal, docker, or agents" in stderr.getvalue()
+
+
+def _install_agents(io_streams, root):
+    stdout, stderr = io_streams
+    assert CLI(["install", "agents"], stdout=stdout, stderr=stderr, root=str(root)).run() == 0
+    return stdout.getvalue()
+
+
+def test_install_agents_sets_up_claude_code_cursor_and_codex_in_a_bare_project(io_streams, tmp_path):
+    from deployangel.cli import agent_instructions
+
+    out = _install_agents(io_streams, tmp_path)
+    server = {"command": "deployangel", "args": ["mcp"]}
+    assert json.loads((tmp_path / ".mcp.json").read_text()) == {"mcpServers": {"deployangel": server}}
+    assert json.loads((tmp_path / ".cursor" / "mcp.json").read_text()) == {"mcpServers": {"deployangel": server}}
+    assert (tmp_path / ".codex" / "config.toml").read_text() == (
+        '[mcp_servers.deployangel]\ncommand = "deployangel"\nargs = ["mcp"]\n'
+        'env_vars = ["DEPLOYANGEL_API_TOKEN", "DEPLOYANGEL_URL"]\n')
+    assert (tmp_path / "AGENTS.md").read_text() == agent_instructions("deployangel")
+    assert "`deployangel verify --commit=<sha> --wait --until=initial`" in (tmp_path / "AGENTS.md").read_text()
+    assert (tmp_path / "CLAUDE.md").read_text() == "@AGENTS.md\n"
+    for text in ("Created .mcp.json", "Created .cursor/mcp.json", "Created .codex/config.toml", "Created AGENTS.md",
+                 "Created CLAUDE.md", "DEPLOYANGEL_API_TOKEN", "Never put it in these files"):
+        assert text in out
+
+
+def test_install_agents_runs_deployangel_through_uv_or_poetry(io_streams, tmp_path):
+    (tmp_path / "uv.lock").write_text("")
+    _install_agents(io_streams, tmp_path)
+    assert json.loads((tmp_path / ".mcp.json").read_text())["mcpServers"]["deployangel"] == {"command": "uv", "args": ["run", "deployangel", "mcp"]}
+    assert 'args = ["run", "deployangel", "mcp"]' in (tmp_path / ".codex" / "config.toml").read_text()
+    assert "`uv run deployangel verify --commit=<sha>" in (tmp_path / "AGENTS.md").read_text()
+
+    poetry = tmp_path / "poetry"
+    poetry.mkdir()
+    (poetry / "poetry.lock").write_text("")
+    _install_agents(io_streams, poetry)
+    assert json.loads((poetry / ".mcp.json").read_text())["mcpServers"]["deployangel"]["command"] == "poetry"
+
+
+def test_install_agents_adds_to_existing_files_and_changes_nothing_when_run_again(io_streams, tmp_path):
+    from deployangel.cli import agent_instructions
+
+    (tmp_path / ".mcp.json").write_text(json.dumps({"mcpServers": {"github": {"command": "gh-mcp"}}}))
+    (tmp_path / ".codex").mkdir()
+    (tmp_path / ".codex" / "config.toml").write_text('model = "gpt-5"\n')
+    (tmp_path / "AGENTS.md").write_text("# Project\n\nRun the tests first.\n")
+    (tmp_path / "CLAUDE.md").write_text("# Claude\n")
+
+    _install_agents(io_streams, tmp_path)
+    block = agent_instructions("deployangel")
+    assert list(json.loads((tmp_path / ".mcp.json").read_text())["mcpServers"]) == ["github", "deployangel"]
+    assert (tmp_path / ".codex" / "config.toml").read_text().startswith('model = "gpt-5"\n\n[mcp_servers.deployangel]\n')
+    assert (tmp_path / "AGENTS.md").read_text() == "# Project\n\nRun the tests first.\n\n" + block
+    assert (tmp_path / "CLAUDE.md").read_text() == "# Claude\n\n" + block
+
+    paths = [".mcp.json", ".cursor/mcp.json", ".codex/config.toml", "AGENTS.md", "CLAUDE.md"]
+    files = {path: (tmp_path / path).read_text() for path in paths}
+    stdout, _ = io_streams
+    stdout.truncate(0)
+    stdout.seek(0)
+    out = _install_agents(io_streams, tmp_path)
+    assert {path: (tmp_path / path).read_text() for path in paths} == files
+    assert "already has a deployangel MCP server" in out and "already has DeployAngel's instructions" in out
+
+
+def test_install_agents_replaces_its_old_instructions_and_leaves_an_importing_claude_md_alone(io_streams, tmp_path):
+    from deployangel.cli import AGENTS_END, AGENTS_START, agent_instructions
+
+    (tmp_path / "AGENTS.md").write_text(f"# Project\n\n{AGENTS_START}\nold advice\n{AGENTS_END}\n\n## Style\n")
+    (tmp_path / "CLAUDE.md").write_text("@AGENTS.md\n")
+    out = _install_agents(io_streams, tmp_path)
+    assert (tmp_path / "AGENTS.md").read_text() == "# Project\n\n" + agent_instructions("deployangel") + "\n## Style\n"
+    assert (tmp_path / "CLAUDE.md").read_text() == "@AGENTS.md\n"
+    assert "Updated DeployAngel's instructions in AGENTS.md." in out
+
+
+def test_install_agents_leaves_a_config_it_cant_read(io_streams, tmp_path):
+    (tmp_path / ".mcp.json").write_text("{ not json")
+    out = _install_agents(io_streams, tmp_path)
+    assert (tmp_path / ".mcp.json").read_text() == "{ not json"
+    assert "Couldn't read .mcp.json, so it's unchanged." in out and 'command "deployangel", args ["mcp"]' in out
 
 
 def test_reports_usage_and_auth_problems_with_exit_5(run, io_streams):

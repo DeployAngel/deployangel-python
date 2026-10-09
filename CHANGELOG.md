@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- `deployangel install agents` sets up Claude Code, Cursor, and Codex in a
+  project: the MCP server in `.mcp.json`, `.cursor/mcp.json`, and
+  `.codex/config.toml` (forwarding `DEPLOYANGEL_API_TOKEN`), and instructions
+  to wait for a verdict after deploying in `AGENTS.md`, with a `CLAUDE.md`
+  that imports it. It runs through `uv run` or `poetry run` in projects that
+  use them, never replaces existing entries, and re-running it only updates
+  its own instructions.
+
 ## 0.1.6 (2026-10-08)
 
 - The agent gets its file digests when it starts, so the reporter works out

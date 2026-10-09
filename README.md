@@ -335,6 +335,7 @@ deployangel release --commit=$SHA           # register a deploy (manual or CI)
 deployangel check --name="smoke: signup" --status=pass --covers=registration
 deployangel install kamal                   # a Kamal post-deploy hook that registers each deploy
 deployangel install docker                  # bake the commit into the image as DEPLOYANGEL_REVISION
+deployangel install agents                  # set up Claude Code, Cursor, and Codex in this project
 ```
 
 Output is text on a terminal and JSON when piped (`--format=text|json`). Exit
@@ -343,7 +344,16 @@ deployment not found, 5 usage, auth, or network error, 6 no problems so far
 at the initial check (not cleared), 7 warnings at the initial check. In
 GitHub Actions, `verify` also writes the verdict to the job's summary.
 
-For coding agents:
+For coding agents, run `deployangel install agents` in the project. It adds
+the MCP server to `.mcp.json` (Claude Code), `.cursor/mcp.json` (Cursor), and
+`.codex/config.toml` (Codex, which reads it only in projects you trust), and
+instructions to wait for a verdict after deploying to `AGENTS.md`, with a
+`CLAUDE.md` that imports it. In a uv or Poetry project it runs `deployangel`
+through `uv run` or `poetry run`. It never replaces an existing entry, and
+running it again updates only its own instructions. Commit the files; the
+token stays in your environment.
+
+Or add the server yourself:
 
 ```bash
 claude mcp add deployangel -- deployangel mcp        # Claude Code (or: -- uvx deployangel mcp)
