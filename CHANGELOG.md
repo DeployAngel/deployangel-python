@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.8 (2026-10-09)
 
 - `deployangel exercise --url=<production URL>` sends a release's exercise
   plan's read-only requests (GET routes without path parameters, at most
