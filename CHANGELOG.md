@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.11 (2026-10-10)
 
 - `deployangel doctor` checks the setup: the agent in the project's
   dependencies (`pyproject.toml`, `requirements*.txt`, `uv.lock`,
