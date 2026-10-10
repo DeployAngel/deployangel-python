@@ -375,7 +375,20 @@ deployangel check --name="smoke: signup" --status=pass --covers=registration
 deployangel install kamal                   # a Kamal post-deploy hook that registers each deploy
 deployangel install docker                  # bake the commit into the image as DEPLOYANGEL_REVISION
 deployangel install agents                  # set up Claude Code, Cursor, and Codex in this project
+deployangel doctor                          # check the setup
 ```
+
+`deployangel doctor` checks this checkout (the agent in the project's
+dependencies, how production will know the release) and, with a token, what
+DeployAngel has seen of the app: which processes report and the release each
+runs, the routes, job classes, and scheduled jobs the agent reported, and
+setup problems with what to do about each. It doesn't load your app, so
+Celery Beat, django-celery-beat, django-crontab, and `recurring_jobs`
+schedules are checked from what the running agent reported. Only errors (a
+rejected token, an unreachable server, no agent in the dependencies) exit 5;
+warnings exit 0, so it's safe in CI. It reads `DEPLOYANGEL_API_TOKEN`, or
+`DEPLOYANGEL_TOKEN` where the app runs, so `heroku run deployangel doctor`
+also shows the release that process reports.
 
 Output is text on a terminal and JSON when piped (`--format=text|json`). Exit
 codes: 0 cleared, 1 failed, 2 not cleared, 3 still verifying or timed out, 4

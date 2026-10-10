@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- `deployangel doctor` checks the setup: the agent in the project's
+  dependencies (`pyproject.toml`, `requirements*.txt`, `uv.lock`,
+  `poetry.lock`, `Pipfile`, `Pipfile.lock`) and how production will know
+  the release; then, with a token, what DeployAngel has seen (processes
+  reporting and their releases, what the agent reported, and setup problems
+  with fixes). Only errors fail it. Run where the app runs, it uses the
+  agent's `DEPLOYANGEL_TOKEN` and shows the release that process reports.
+  It never loads the app, so schedules are left to what the agent reported.
+  Needs a DeployAngel server with `GET /api/v1/setup`.
+
 ## 0.1.10 (2026-10-09)
 
 - Work scheduled outside the app's own scheduler is watched too.

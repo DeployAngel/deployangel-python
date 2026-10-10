@@ -56,6 +56,13 @@ def test_reads_json_and_sends_the_token(api):
     assert headers["User-Agent"].startswith("deployangel-cli-python/")
 
 
+def test_reads_the_setup_document_for_doctor(api):
+    Handler.routes["/api/v1/setup"] = (200, b'{"app": {"name": "shop"}, "gaps": []}')
+
+    assert Client("da_live_agent", endpoint=api).setup()["app"] == {"name": "shop"}
+    assert Handler.requests[-1][:2] == ("GET", "/api/v1/setup")
+
+
 def test_posts_checks_as_json(api):
     Handler.routes["/api/v1/deployments/commit%3Aabc1234/checks"] = (201, b'{"id": 1, "deployment_id": 42}')
     result = Client("t", endpoint=api).report_check("commit:abc1234", name="smoke", status="pass", covers=["GET /"])

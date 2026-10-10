@@ -42,6 +42,8 @@ HELP = f"""Usage: deployangel <command> [options]
   install    Add a Kamal deploy hook,       deployangel install kamal
              bake the commit into an image, deployangel install docker
              or set up coding agents        deployangel install agents
+  doctor     Check the setup: this checkout  [--format=text|json]
+             and what DeployAngel has seen
   mcp        Run the MCP server over stdio (for coding agents)
 
 With no target, verify, plan, and check use the current git HEAD commit.
@@ -155,7 +157,7 @@ class CLI:
         command = self.argv.pop(0) if self.argv else None
         commands = {"release": self.release, "verify": self.verify, "status": lambda: self.verify(status=True),
                     "plan": self.plan, "exercise": self.exercise, "exception": self.exception, "check": self.check, "install": self.install,
-                    "mcp": self.mcp}
+                    "doctor": self.doctor, "mcp": self.mcp}
         try:
             if command in commands:
                 return commands[command]()
@@ -481,6 +483,27 @@ class CLI:
         self._print("Added DEPLOYANGEL_REVISION to the Dockerfile's last stage. " + DOCKER_BUILD_HELP)
         return 0
 
+    def doctor(self) -> int:
+        """What this checkout will report and what DeployAngel has seen of the
+        app. Warnings are advice, so only errors (a rejected token, an
+        unreachable server, no agent in the dependencies) fail it."""
+        from deployangel.cli.doctor import Doctor
+
+        parser = self._parser([])
+        parser.add_argument("--format", choices=("text", "json"))
+        options = vars(parser.parse_args(self.argv))
+        doctor = Doctor(self.root, self._doctor_client(), self.env)
+        self._output(doctor.to_dict(), options["format"], lambda: _doctor_text(doctor.checks))
+        return USAGE_ERROR if doctor.failed else 0
+
+    def _doctor_client(self):
+        """Either token works: the setup endpoint answers any of the app's. The
+        agent's own token is for running it where the app runs."""
+        if self._client is not None:
+            return self._client
+        token = next((value for value in (self.env.get("DEPLOYANGEL_API_TOKEN"), self.env.get("DEPLOYANGEL_TOKEN")) if value), None)
+        return Client(token, self.env.get("DEPLOYANGEL_URL") or DEFAULT_ENDPOINT) if token else None
+
     def mcp(self) -> int:
         from deployangel.cli.mcp import Server
 
@@ -589,6 +612,18 @@ def _add_revision(dockerfile: str) -> str:
             lines[-1] += "\n"
         return "".join(lines) + ("\n" if lines and lines[-1].strip() else "") + DOCKERFILE_LINES
     return "".join(lines[:insert_at]) + DOCKERFILE_LINES + "\n" + "".join(lines[insert_at:])
+
+
+DOCTOR_MARKS = {"ok": "✓", "warn": "!", "error": "✗", "info": "·"}
+
+
+def _doctor_text(checks: list) -> str:
+    lines = ["DeployAngel doctor"]
+    for check in checks:
+        lines.append(f"  {DOCTOR_MARKS[check.status]} {check.message}")
+        if check.fix:
+            lines.append(f"      {check.fix}")
+    return "\n".join(lines)
 
 
 def _isatty(stream) -> bool:

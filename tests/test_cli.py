@@ -8,7 +8,7 @@ import os
 import pytest
 
 from deployangel.cli import CLI, ci
-from deployangel.cli.client import NotFound
+from deployangel.cli.client import ApiError, NotFound, Unauthorized
 from deployangel.cli.mcp import Server
 
 START = 1790776800.0  # 2026-09-30 14:00 UTC
@@ -33,6 +33,7 @@ class FakeClient:
         self.deployments_list = [{"id": 42}] if deployments_list is None else deployments_list
         self.scopes = list(scopes)
         self.calls = []
+        self.setup_document = None
 
     def token_info(self):
         self.calls.append(("token_info",))
@@ -63,6 +64,14 @@ class FakeClient:
     def record_exercise(self, deployment_id, **attributes):
         self.calls.append(("exercise", deployment_id, attributes))
         return {"id": 1, "deployment_id": deployment_id}
+
+    def setup(self):
+        self.calls.append(("setup",))
+        if isinstance(self.setup_document, Exception):
+            raise self.setup_document
+        if self.setup_document is None:
+            raise NotFound("not found")
+        return self.setup_document
 
     def exception(self, fingerprint):
         return {"fingerprint": fingerprint, "exception_class": "NoMethodError", "backtrace": []}
@@ -667,3 +676,260 @@ def test_exercise_sends_nothing_without_a_plan_and_needs_the_url(io_streams, clo
 
     code, _ = _exercise(io_streams, clock, "--url=shop.example.com", client=FakeClient([_exercise_document()]))
     assert code == 5 and "exercise needs --url" in io_streams[1].getvalue()
+
+
+def setup_document(**overrides):
+    return {"app": {"id": 1, "name": "shop", "environment": "production"},
+            "token": {"scopes": ["verifications:read"], "purpose": "read"},
+            "agent": {"last_received_at": "2026-10-09T11:59:00Z", "reporting": True,
+                      "processes": [{"host": "web.1", "processes": 2, "release": "81ac27d"},
+                                    {"host": "worker.1", "processes": 1, "release": "81ac27d"}]},
+            "metadata": {"routes": 42, "job_classes": 12, "schedules": 2},
+            "scheduled_jobs": [{"label": "shop.tasks.nightly_invoices", "status": "ran"}, {"label": "shop.tasks.sync", "status": "ran"}],
+            "warm_up_ends_at": None,
+            "deployments": {"count": 3, "latest": {"label": "v12", "verdict": "verified"}},
+            "gaps": [], **overrides}
+
+
+UV_LOCK = """version = 1
+requires-python = ">=3.10"
+
+[[package]]
+name = "celery"
+version = "5.5.3"
+source = { registry = "https://pypi.org/simple" }
+
+[[package]]
+name = "deployangel"
+version = "0.1.10"
+source = { registry = "https://pypi.org/simple" }
+"""
+
+
+class TestDoctor:
+    @pytest.fixture(autouse=True)
+    def checkout(self, tmp_path, io_streams):
+        self.root = tmp_path
+        self.stdout, self.stderr = io_streams
+        self.write("pyproject.toml", '[project]\nname = "shop"\ndependencies = [\n  "django>=4.2",\n  "celery[redis]>=5.3",\n'
+                                     '  "deployangel",\n]\n\n[tool.ruff]\nline-length = 120\n')
+        self.write("uv.lock", UV_LOCK)
+
+    def write(self, path, content):
+        (self.root / path).parent.mkdir(parents=True, exist_ok=True)
+        (self.root / path).write_text(content)
+
+    def doctor(self, *argv, client=None, env=None):
+        return CLI(["doctor", "--format=text", *argv], env=env or {}, stdout=self.stdout, stderr=self.stderr, client=client,
+                   root=str(self.root)).run()
+
+    def output(self):
+        return self.stdout.getvalue()
+
+    def clear(self):
+        self.stdout.seek(0)
+        self.stdout.truncate(0)
+
+    @staticmethod
+    def client(document):
+        client = FakeClient()
+        client.setup_document = document
+        return client
+
+    def test_checks_this_checkout_and_what_deployangel_has_seen_and_passes_when_nothings_wrong(self):
+        assert self.doctor(client=self.client(setup_document())) == 0
+        assert self.output() == """DeployAngel doctor
+  ✓ Agent: deployangel 0.1.10 in uv.lock
+  · This checkout's scheduled jobs aren't checked here. Celery Beat's beat_schedule and recurring_jobs are read when the app runs.
+  ✓ App: shop (production)
+  ✓ Agent reporting from 3 processes (web.1 ×2, worker.1), release 81ac27d
+  ✓ Reported: 42 routes, 12 job classes, 2 scheduled jobs
+  · 3 deploys so far; the latest, v12, is verified
+"""
+
+    def test_lists_setup_gaps_with_their_fixes_and_scheduled_jobs_needing_attention_without_failing(self):
+        client = self.client(setup_document(
+            scheduled_jobs=[{"label": "shop.tasks.sync", "status": "overdue"}],
+            gaps=[{"code": "no_job_process", "title": "No job has run since the agent started reporting", "fix": "Give that process the settings."}]))
+
+        assert self.doctor(client=client) == 0
+        assert "! Reported: 42 routes, 12 job classes, 2 scheduled jobs, 1 needing attention (shop.tasks.sync overdue)" in self.output()
+        assert "! No job has run since the agent started reporting\n      Give that process the settings." in self.output()
+
+    def test_says_how_production_will_know_the_release_before_the_agent_reports_from_the_deploy_files_here(self):
+        self.write("Dockerfile", 'FROM python:3.12\nCMD ["gunicorn", "shop.wsgi"]\n')
+        client = self.client(setup_document(agent={"last_received_at": None, "reporting": False, "processes": []}, metadata=None,
+                                            scheduled_jobs=None, deployments={"count": 0, "latest": None}))
+
+        self.doctor(client=client)
+        assert "! The agent hasn't reported yet" in self.output()
+        assert ("· The Dockerfile doesn't set DEPLOYANGEL_REVISION; unless your platform passes the commit, releases won't be named by "
+                "commit\n      Run `deployangel install docker`") in self.output()
+
+        self.clear()
+        self.write(".do/app.yaml", "envs:\n  - key: DEPLOYANGEL_REVISION\n    value: ${_self.COMMIT_HASH}\n")
+        self.doctor(client=client)
+        assert "✓ The DigitalOcean app spec passes the commit in DEPLOYANGEL_REVISION" in self.output()
+
+    def test_trusts_the_server_that_the_agent_is_reporting_even_with_no_recent_process_batches(self):
+        client = self.client(setup_document(agent={"last_received_at": "2026-10-09T11:59:00Z", "reporting": True, "processes": []}))
+        self.doctor(client=client)
+        assert "✓ Agent reporting\n" in self.output()
+
+    # The gem also compares the schedules in the checkout's files with what the
+    # running agent reported. A Python app's schedules are read only when it
+    # runs, so there's nothing to compare: doctor names where they come from.
+    def test_leaves_schedules_to_the_running_agent_naming_the_schedulers_in_the_dependencies(self):
+        self.write("requirements.txt", "django-celery-beat==2.7.0\ndjango_crontab\n")
+        self.doctor()
+        assert ("· This checkout's scheduled jobs aren't checked here. Celery Beat's beat_schedule, django-celery-beat's periodic tasks, "
+                "django-crontab's CRONJOBS, and recurring_jobs are read when the app runs.") in self.output()
+
+        self.clear()
+        self.write("pyproject.toml", '[project]\nname = "shop"\ndependencies = ["fastapi", "deployangel"]\n')
+        (self.root / "uv.lock").unlink()
+        (self.root / "requirements.txt").unlink()
+        self.doctor()
+        assert "· This checkout's scheduled jobs aren't checked here. recurring_jobs is read when the app runs." in self.output()
+
+    def test_checks_only_this_checkout_without_a_token_and_fails_on_a_rejected_token_or_a_missing_agent(self):
+        assert self.doctor() == 0
+        assert "! No token, so only this checkout was checked" in self.output()
+
+        self.clear()
+        assert self.doctor(client=self.client(Unauthorized("HTTP 401"))) == 5
+        assert "✗ DeployAngel rejected the token (HTTP 401)" in self.output()
+
+        self.clear()
+        self.write("pyproject.toml", '[project]\nname = "shop"\ndependencies = ["django>=4.2"]\n')
+        self.write("uv.lock", 'version = 1\n\n[[package]]\nname = "django"\nversion = "5.2.7"\n')
+        assert self.doctor() == 5
+        assert "✗ The agent isn't in the project's dependencies\n      Run uv add deployangel." in self.output()
+
+    def test_warns_on_a_server_without_doctor_and_fails_when_it_cant_be_reached(self):
+        assert self.doctor(client=self.client(None)) == 0
+        assert "! This DeployAngel server doesn't support doctor yet; only this checkout was checked" in self.output()
+
+        self.clear()
+        assert self.doctor(client=self.client(ApiError("could not reach https://api.deployangel.com: URLError: timed out"))) == 5
+        assert "✗ Couldn't reach DeployAngel: could not reach https://api.deployangel.com: URLError: timed out" in self.output()
+
+    def test_reads_either_token_the_clis_or_the_agents(self):
+        cli = CLI(["doctor"], env={"DEPLOYANGEL_TOKEN": "da_live_agent"}, stdout=self.stdout, stderr=self.stderr, root=str(self.root))
+        assert cli._doctor_client().token == "da_live_agent"
+        cli = CLI(["doctor"], env={"DEPLOYANGEL_TOKEN": "da_live_agent", "DEPLOYANGEL_API_TOKEN": "da_cli"}, root=str(self.root))
+        assert cli._doctor_client().token == "da_cli"
+        assert CLI(["doctor"], env={}, root=str(self.root))._doctor_client() is None
+
+    def test_says_which_release_this_process_would_report_where_the_app_runs_but_not_from_a_checkouts_git_head(self):
+        client = self.client(setup_document())
+
+        self.doctor(client=client, env={"DEPLOYANGEL_TOKEN": "da_live_agent", "HEROKU_BUILD_COMMIT": "81ac27d0", "HEROKU_RELEASE_VERSION": "v12"})
+        assert "✓ Here, the agent would report release v12 (from heroku_dyno_metadata)" in self.output()
+
+        # Nothing names the release, so the agent would report the code fingerprint.
+        self.clear()
+        self.doctor(client=client, env={"DEPLOYANGEL_TOKEN": "da_live_agent"})
+        assert "! Here, the agent would report release code:" in self.output()
+        assert ("(from code_fingerprint), with no commit\n      Set DEPLOYANGEL_REVISION to the deployed commit to see each release's "
+                "commits and pull requests.") in self.output()
+
+        self.clear()
+        self.doctor(client=client, env={"DEPLOYANGEL_TOKEN": "da_live_agent", "DEPLOYANGEL_FILE_DIGESTS": "false"})
+        assert "! Here, the agent can't tell which release is running" in self.output()
+
+        self.clear()
+        self.doctor(client=client)
+        assert "Here, the agent" not in self.output()
+
+        self.clear()
+        self.write(".git/HEAD", "81ac27d0f00dbadc0ffee81ac27d0f00dbadc0ff\n")
+        self.doctor(client=client, env={"DEPLOYANGEL_TOKEN": "da_live_agent"})
+        assert "Here, the agent" not in self.output()
+
+    def test_writes_the_checks_and_the_servers_document_as_json(self):
+        CLI(["doctor", "--format=json"], env={}, stdout=self.stdout, stderr=self.stderr, client=self.client(setup_document()),
+            root=str(self.root)).run()
+
+        document = json.loads(self.output())
+        assert document["checks"][0] == {"status": "ok", "message": "Agent: deployangel 0.1.10 in uv.lock"}
+        assert document["setup"]["app"]["name"] == "shop"
+
+    @pytest.mark.parametrize("path, content, found", [
+        ("requirements.txt", "Django>=4.2\nDeployAngel==0.1.9  # the agent\n", "Agent: deployangel 0.1.9 in requirements.txt"),
+        ("requirements/production.txt", "-r base.txt\ndeployangel[django]>=0.1\n", "Agent: deployangel in requirements/production.txt"),
+        ("poetry.lock", '[[package]]\nname = "deployangel"\nversion = "0.1.8"\ndescription = "DeployAngel agent"\n',
+         "Agent: deployangel 0.1.8 in poetry.lock"),
+        ("Pipfile.lock", json.dumps({"default": {"deployangel": {"version": "==0.1.7"}}, "develop": {}}),
+         "Agent: deployangel 0.1.7 in Pipfile.lock"),
+        ("Pipfile", '[packages]\ndjango = "*"\ndeployangel = "*"\n', "Agent: deployangel in Pipfile"),
+        ("pyproject.toml", '[tool.poetry]\nname = "shop"\n\n[tool.poetry.dependencies]\npython = "^3.10"\ndeployangel = "^0.1.10"\n',
+         "Agent: deployangel in pyproject.toml"),
+        ("requirements.txt", "deployangel-extras==1.0\n", "✗ The agent isn't in the project's dependencies"),
+        ("pyproject.toml", '[project]\nname = "deployangel"\ndependencies = []\n\n[project.scripts]\ndeployangel = "x:main"\n',
+         "✗ The agent isn't in the project's dependencies"),
+    ])
+    def test_finds_the_agent_in_each_kind_of_dependency_file(self, path, content, found):
+        (self.root / "pyproject.toml").unlink()
+        (self.root / "uv.lock").unlink()
+        self.write(path, content)
+        self.doctor()
+        assert found in self.output()
+
+    def test_skips_the_agent_check_without_dependency_files_and_says_how_to_add_the_agent(self):
+        (self.root / "uv.lock").unlink()
+        self.write("pyproject.toml", '[tool.ruff]\nline-length = 120\n')
+        assert self.doctor() == 0
+        assert "Agent" not in self.output()
+
+        for path, content, fix in [
+            ("poetry.lock", '[[package]]\nname = "django"\nversion = "5.2.7"\n', "Run poetry add deployangel."),
+            ("Pipfile", '[packages]\ndjango = "*"\n', "Run pipenv install deployangel."),
+            ("requirements-prod.txt", "django\n", "Add deployangel to requirements-prod.txt and run pip install -r requirements-prod.txt."),
+        ]:
+            self.clear()
+            for name in ("poetry.lock", "Pipfile", "requirements-prod.txt"):
+                if (self.root / name).exists():
+                    (self.root / name).unlink()
+            self.write(path, content)
+            assert self.doctor() == 5
+            assert f"✗ The agent isn't in the project's dependencies\n      {fix}" in self.output()
+
+    def test_reads_kamal_a_dockerfile_that_passes_the_commit_and_heroku_from_the_deploy_files(self):
+        quiet = setup_document(agent={"last_received_at": None, "reporting": False, "processes": []}, metadata=None)
+        self.write("Procfile", "web: gunicorn shop.wsgi\n")
+        self.doctor(client=self.client(quiet))
+        assert ("· On Heroku, turn on dyno metadata so the agent knows the commit\n"
+                "      heroku labs:enable runtime-dyno-metadata && heroku labs:enable runtime-dyno-build-metadata") in self.output()
+
+        self.clear()
+        self.write("Dockerfile", "FROM python:3.12\nARG GIT_SHA\nENV DEPLOYANGEL_REVISION=$GIT_SHA\n")
+        self.doctor(client=self.client(quiet))
+        assert "✓ The Dockerfile passes the commit in DEPLOYANGEL_REVISION" in self.output()
+
+        self.clear()
+        self.write("config/deploy.yml", "service: shop\n")
+        self.doctor(client=self.client(quiet))
+        assert "✓ Kamal deploys: the agent reads the release from KAMAL_VERSION" in self.output()
+
+        # Once processes report, what they report says it instead.
+        self.clear()
+        self.doctor(client=self.client(setup_document()))
+        assert "Kamal" not in self.output()
+
+    def test_says_when_the_agent_last_reported_and_while_its_learning_whats_normal(self):
+        hosts = [{"host": f"web.{n}", "processes": 1, "release": f"r{n}"} for n in range(1, 8)]
+        client = self.client(setup_document(agent={"last_received_at": "2026-10-09T11:59:00Z", "reporting": True, "processes": hosts},
+                                            warm_up_ends_at="2026-10-16T09:05:00.123Z"))
+        self.doctor(client=client)
+        assert "✓ Agent reporting from 7 processes (web.1, web.2, web.3, web.4, web.5, and others)\n" in self.output()
+        assert ("· Learning what's normal for this app until Oct 16, 09:05 UTC; deploys before then are checked, not cleared"
+                in self.output())
+
+        self.clear()
+        client = self.client(setup_document(agent={"last_received_at": "2026-10-09T11:59:00Z", "reporting": False, "processes": []},
+                                            deployments={"count": 0, "latest": None}))
+        self.doctor(client=client)
+        assert ("! The agent last reported Oct 9, 11:59 UTC, and nothing since\n"
+                "      Check the app is running, and that DEPLOYANGEL_TOKEN is still set on its processes.") in self.output()
+        assert "· No deploys yet: your next deploy gets the first verdict" in self.output()

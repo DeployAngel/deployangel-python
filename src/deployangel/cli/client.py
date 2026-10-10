@@ -39,6 +39,9 @@ class Client:
     def token_info(self) -> dict:
         return self._get("/api/v1/token")
 
+    def setup(self) -> dict:
+        return self._get("/api/v1/setup")
+
     def latest_deployment(self) -> dict:
         return self._get("/api/v1/deployments/latest")
 
