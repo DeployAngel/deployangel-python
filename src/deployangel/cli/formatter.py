@@ -77,7 +77,9 @@ def status_line(document: dict) -> str:
 
 def notes(document: dict) -> list:
     v = document.get("verification") or {}
-    found = []
+    # What a clearance doesn't cover, right under it (servers from
+    # 2026-10-10 send it).
+    found = list(((document.get("clearance") or {}).get("scope") or {}).get("lines") or [])
     check = v.get("initial_check")
     if check and v.get("verdict") is None:
         found.append(f"Initial check: {check['result'].replace('_', ' ')}. Not cleared yet.")

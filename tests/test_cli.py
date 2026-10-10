@@ -128,6 +128,19 @@ def test_maps_verdicts_to_exit_codes(run):
         assert run("verify", "--format=json", client=FakeClient([verdict_document("closed", verdict)])) == code
 
 
+def test_prints_what_a_clearance_doesnt_cover_right_under_it_in_text_and_in_the_job_summary(run, tmp_path):
+    document = verdict_document("closed", "verified")
+    document["clearance"]["scope"] = {"lines": ["Not assessed: HTTP p95 latency (needs 200 requests; had 140)",
+                                                "Not run since the deploy: critical flow sign_in"]}
+    summary = tmp_path / "summary.md"
+
+    assert run("verify", "--format=text", client=FakeClient([document]), env={"GITHUB_STEP_SUMMARY": str(summary)}) == 0
+    assert run.stdout.getvalue().splitlines()[:4] == [
+        "v184 verified", "State: closed · Verdict: verified · Confidence: high · Coverage: 100%",
+        "Not assessed: HTTP p95 latency (needs 200 requests; had 140)", "Not run since the deploy: critical flow sign_in"]
+    assert "Not run since the deploy: critical flow sign_in" in summary.read_text()
+
+
 def test_defaults_to_the_git_head_commit(run):
     client = FakeClient([verdict_document("closed", "verified")])
     run("verify", client=client)

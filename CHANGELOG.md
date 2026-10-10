@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- `verify` prints what a clearance doesn't cover right under it: app-wide
+  signals without enough data, critical flows and changed items not run
+  since the deploy, and latency that rose but stayed within limits (from
+  the verdict document's new `clearance.scope`). The coding-agent
+  instructions `install agents` writes now say to report it too.
+
 ## 0.1.11 (2026-10-10)
 
 - `deployangel doctor` checks the setup: the agent in the project's
