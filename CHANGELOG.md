@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.12 (2026-10-10)
 
 - `verify` prints what a clearance doesn't cover right under it: app-wide
   signals without enough data, critical flows and changed items not run
