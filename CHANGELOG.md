@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- `deployangel setup --code=CODE` redeems a one-time code from "Set up with
+  your coding agent" and saves the app's token and a "CI deploys" token to
+  `.deployangel/credentials.json` (readable only by you, kept out of git),
+  without printing either, so tokens stay out of coding agents' chats. The
+  command and MCP server use the saved token when `DEPLOYANGEL_API_TOKEN`
+  isn't set. `deployangel token app|api` prints a saved token for piping into
+  a host's or CI's secrets. Same as the Ruby gem's.
+
 ## 0.1.12 (2026-10-10)
 
 - `verify` prints what a clearance doesn't cover right under it: app-wide

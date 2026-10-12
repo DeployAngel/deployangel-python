@@ -364,6 +364,20 @@ token in `DEPLOYANGEL_API_TOKEN`: a "CLI & coding agents" token reads
 verdicts, and a "CI deploys" token can also register deploys and report
 checks.
 
+To let a coding agent set DeployAngel up, use "Set up with your coding agent"
+on the app's page in DeployAngel: it gives a one-time setup code, not tokens.
+`deployangel setup --code=CODE` redeems it and saves the app's token and a "CI
+deploys" token to `.deployangel/credentials.json`, readable only by you and
+kept out of git, without printing either. The command and MCP server then use
+the saved token whenever `DEPLOYANGEL_API_TOKEN` isn't set. `deployangel token
+app` (or `api`) prints a saved token for piping into a host's or CI's
+secrets, so it never appears on screen or in an agent's conversation:
+
+```bash
+fly secrets set DEPLOYANGEL_TOKEN=$(deployangel token app)
+deployangel token api | gh secret set DEPLOYANGEL_API_TOKEN
+```
+
 ```bash
 deployangel verify --wait                   # current git HEAD, until a verdict
 deployangel verify --wait --until=initial   # return at the 15-minute initial check

@@ -91,6 +91,16 @@ def test_raises_when_the_server_cant_be_reached():
         client.token_info()
 
 
+def test_redeems_a_setup_code_with_no_token(api):
+    Handler.routes["/api/v1/setup_codes/redeem"] = (201, json.dumps({"app_token": "a", "api_token": "b"}).encode())
+    result = Client(None, endpoint=api, require_token=False).redeem_setup_code("da_setup_x")
+
+    assert result == {"app_token": "a", "api_token": "b"}
+    method, path, headers, body = Handler.requests[-1]
+    assert (method, path, json.loads(body)) == ("POST", "/api/v1/setup_codes/redeem", {"code": "da_setup_x"})
+    assert "Authorization" not in headers
+
+
 def test_needs_a_token():
     with pytest.raises(Unauthorized, match="DEPLOYANGEL_API_TOKEN is not set"):
         Client(None)

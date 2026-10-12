@@ -16,7 +16,7 @@ import sys
 import time
 from typing import Callable, Mapping, Optional
 
-from deployangel.cli import ci, formatter
+from deployangel.cli import ci, credentials, formatter
 from deployangel.cli.client import ApiError, Client, NotFound, Unauthorized
 from deployangel.cli.waiter import NOT_FOUND, UNTIL_MODES, Waiter
 from deployangel.config import DEFAULT_ENDPOINT
@@ -44,13 +44,18 @@ HELP = f"""Usage: deployangel <command> [options]
              or set up coding agents        deployangel install agents
   doctor     Check the setup: this checkout  [--format=text|json]
              and what DeployAngel has seen
+  setup      Redeem a one-time setup code   deployangel setup --code=CODE
+             and save the app's tokens here, without printing them
+  token      Print a saved token, to pipe   deployangel token app|api
+             into a host's or CI's secrets
   mcp        Run the MCP server over stdio (for coding agents)
 
 With no target, verify, plan, and check use the current git HEAD commit.
 In GitHub Actions, GitLab CI, CircleCI, and Buildkite, release fills in the
 commit, a build label (e.g. run-123), and a link to the run automatically.
 In a Kamal hook, it registers Kamal's release (KAMAL_VERSION).
-Environment: DEPLOYANGEL_API_TOKEN (required), DEPLOYANGEL_URL (default {DEFAULT_ENDPOINT})
+Token: DEPLOYANGEL_API_TOKEN, else the one `deployangel setup` saved in .deployangel/.
+Environment: DEPLOYANGEL_URL (default {DEFAULT_ENDPOINT})
 
 Exit codes: 0 verified, 1 failed, 2 inconclusive, 3 still in progress / timed out,
             4 deployment not found, 5 usage, auth, or network error,
@@ -158,7 +163,7 @@ class CLI:
         command = self.argv.pop(0) if self.argv else None
         commands = {"release": self.release, "verify": self.verify, "status": lambda: self.verify(status=True),
                     "plan": self.plan, "exercise": self.exercise, "exception": self.exception, "check": self.check, "install": self.install,
-                    "doctor": self.doctor, "mcp": self.mcp}
+                    "doctor": self.doctor, "setup": self.setup, "token": self.token, "mcp": self.mcp}
         try:
             if command in commands:
                 return commands[command]()
@@ -502,8 +507,9 @@ class CLI:
         agent's own token is for running it where the app runs."""
         if self._client is not None:
             return self._client
-        token = next((value for value in (self.env.get("DEPLOYANGEL_API_TOKEN"), self.env.get("DEPLOYANGEL_TOKEN")) if value), None)
-        return Client(token, self.env.get("DEPLOYANGEL_URL") or DEFAULT_ENDPOINT) if token else None
+        candidates = (self.env.get("DEPLOYANGEL_API_TOKEN"), self.env.get("DEPLOYANGEL_TOKEN"), self._saved().get("api_token"))
+        token = next((value for value in candidates if value), None)
+        return Client(token, self._endpoint()) if token else None
 
     def mcp(self) -> int:
         from deployangel.cli.mcp import Server
@@ -513,9 +519,65 @@ class CLI:
         return 0
 
     def client(self):
+        """DEPLOYANGEL_API_TOKEN, else the token `deployangel setup` saved here."""
         if self._client is None:
-            self._client = Client(self.env.get("DEPLOYANGEL_API_TOKEN"), self.env.get("DEPLOYANGEL_URL") or DEFAULT_ENDPOINT)
+            token = self.env.get("DEPLOYANGEL_API_TOKEN") or self._saved().get("api_token")
+            self._client = Client(token, self._endpoint())
         return self._client
+
+    def _endpoint(self) -> str:
+        return self.env.get("DEPLOYANGEL_URL") or self._saved().get("endpoint") or DEFAULT_ENDPOINT
+
+    def _saved(self) -> dict:
+        if getattr(self, "_saved_credentials", None) is None:
+            self._saved_credentials = credentials.read(self.root)
+        return self._saved_credentials
+
+    def setup(self) -> int:
+        """Redeems a one-time code from "Set up with your coding agent" for the
+        app's two tokens, and saves them without printing either, so they stay
+        out of a coding agent's conversation."""
+        parser = self._parser([("--code",)])
+        options = vars(parser.parse_args(self.argv))
+        if not options["code"]:
+            return self._usage_error('setup needs --code (from "Set up with your coding agent" on the app\'s page)')
+        redeemer = self._client or Client(None, self._endpoint(), require_token=False)
+        result = redeemer.redeem_setup_code(options["code"].strip())
+        app = result.get("app") or {}
+        file = credentials.write(self.root, {"app": app, "app_token": result.get("app_token"),
+                                             "api_token": result.get("api_token"), "endpoint": self._endpoint()})
+        self._saved_credentials = None
+        relative = os.path.relpath(file, self.root)
+        command = self._command_name()
+        self._print(f"""Set up DeployAngel for {app.get('name')} ({app.get('environment')}). Saved its app token and a "CI deploys" token to
+{relative}, kept out of git and not shown here. The deployangel command and MCP server here use them.
+
+Give production the app token without printing it, for example:
+  fly secrets set DEPLOYANGEL_TOKEN=$({command} token app)
+  heroku config:set DEPLOYANGEL_TOKEN=$({command} token app)
+and CI the "CI deploys" token:
+  {command} token api | gh secret set DEPLOYANGEL_API_TOKEN""")
+        return 0
+
+    def token(self) -> int:
+        """Prints a saved token, for piping into a host's or CI's secrets.
+        Never run it bare where its output is shown, such as an agent's chat."""
+        kind = self.argv.pop(0) if self.argv else None
+        if kind not in ("app", "api"):
+            return self._usage_error("token needs app or api: deployangel token app")
+        value = self._saved().get(f"{kind}_token")
+        if not value:
+            return self._usage_error("no token saved here; run deployangel setup --code=<code> first")
+        self.stdout.write(value + ("\n" if _isatty(self.stdout) else ""))
+        self.stdout.flush()
+        return 0
+
+    def _command_name(self) -> str:
+        if os.path.exists(os.path.join(self.root, "uv.lock")):
+            return "uv run deployangel"
+        if os.path.exists(os.path.join(self.root, "poetry.lock")):
+            return "poetry run deployangel"
+        return "deployangel"
 
     def git_head(self) -> Optional[str]:
         if self._git_head:

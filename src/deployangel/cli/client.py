@@ -29,9 +29,11 @@ class Unauthorized(ApiError):
 
 
 class Client:
-    def __init__(self, token: Optional[str], endpoint: str = DEFAULT_ENDPOINT, timeout: float = 15.0):
-        if not token:
-            raise Unauthorized("DEPLOYANGEL_API_TOKEN is not set")
+    def __init__(self, token: Optional[str], endpoint: str = DEFAULT_ENDPOINT, timeout: float = 15.0,
+                 require_token: bool = True):
+        # token=None only for redeeming a setup code, which is its own credential.
+        if require_token and not token:
+            raise Unauthorized("DEPLOYANGEL_API_TOKEN is not set, and no token was saved here by `deployangel setup`")
         self.token = token
         self.endpoint = endpoint.rstrip("/")
         self.timeout = timeout
@@ -56,6 +58,10 @@ class Client:
 
     def verification(self, deployment_id, all_findings: bool = False) -> dict:
         return self._get(f"/api/v1/deployments/{deployment_id}/verification", {"findings": "all"} if all_findings else {})
+
+    def redeem_setup_code(self, code: str) -> dict:
+        """The app's token and a "CI deploys" token, for a one-time setup code."""
+        return self._post("/api/v1/setup_codes/redeem", {"code": code})
 
     def register_deployment(self, commit=None, version=None, kind=None, provider=None, source_url=None) -> dict:
         body = {"commit": commit, "version": version, "kind": kind, "provider": provider, "source_url": source_url}
@@ -83,7 +89,8 @@ class Client:
         return self._request(request)
 
     def _request(self, request: urllib.request.Request) -> Any:
-        request.add_header("Authorization", f"Bearer {self.token}")
+        if self.token:
+            request.add_header("Authorization", f"Bearer {self.token}")
         request.add_header("Accept", "application/json")
         request.add_header("User-Agent", f"deployangel-cli-python/{VERSION}")
         try:
