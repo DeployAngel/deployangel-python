@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.15 (2026-10-12)
 
 - Clearer setup for coding agents, from a first-day rehearsal: `setup` says
   the running app reads its token only from `DEPLOYANGEL_TOKEN` and points to
