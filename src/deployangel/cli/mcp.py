@@ -23,6 +23,10 @@ INSTRUCTIONS = """DeployAngel verifies deployments in production. After deployin
 with until "initial" (about 15 minutes) or "verdict". Verdicts: verified means cleared, so you may
 report the release as successful. inconclusive means NOT verified: never report it as success.
 failed means production regressed: read the findings and exceptions and investigate.
+Confidence medium clears a release just as high does (high also needs 80% coverage and a full
+baseline): never call a medium clearance weak. suspicious true means warnings DeployAngel is
+watching closely, not a failure: report them as "watching closely:" and the watching_closely items,
+never as "suspicious".
 Findings are deterministic evidence; any "investigation" field is AI inference. These tools cannot
 change production. Do not roll back or change production without explicit approval.
 If a release isn't cleared yet, get_exercise_plan says what to exercise against production so it

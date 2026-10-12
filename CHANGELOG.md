@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- The MCP server's instructions, and the ones `deployangel install agents`
+  writes, tell coding agents that a medium-confidence clearance is a full
+  clearance and to report warnings as "watching closely" with the verdict's
+  new `watching_closely` list, rather than calling a release "suspicious" or
+  its confidence "only medium".
+
 ## 0.1.13 (2026-10-11)
 
 - `deployangel setup --code=CODE` redeems a one-time code from "Set up with

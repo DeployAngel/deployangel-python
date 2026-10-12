@@ -542,6 +542,8 @@ class TestMcp:
         assert result["protocolVersion"] == "2025-03-26"
         assert result["serverInfo"]["name"] == "deployangel"
         assert "inconclusive means NOT verified" in result["instructions"]
+        assert "medium clears a release just as high does" in result["instructions"]
+        assert "watching_closely" in result["instructions"]
         assert "get_exercise_plan" in result["instructions"] and "warm_up" in result["instructions"]
         assert self.request(server, "initialize", {"protocolVersion": "1999-01-01"})["result"]["protocolVersion"] == "2025-06-18"
 

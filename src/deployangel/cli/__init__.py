@@ -105,6 +105,10 @@ verdict: call the `wait_for_verification` MCP tool with the commit and
   plan's read-only requests and records them on the release. Offer to
   exercise what it skips: routes that change data only with a test account
   or after asking. If the status is "warm_up", nothing run can clear it.
+- Confidence `medium` clears a release just as `high` does (high also needs 80%
+  coverage and a full baseline), so don't call a medium clearance weak.
+  Warnings (`suspicious: true`) aren't failures: report them as "watching
+  closely:" and the `watching_closely` items, never as "suspicious".
 {AGENTS_END}
 """
 
