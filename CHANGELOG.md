@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.14 (2026-10-12)
 
 - The MCP server's instructions, and the ones `deployangel install agents`
   writes, tell coding agents that a medium-confidence clearance is a full
