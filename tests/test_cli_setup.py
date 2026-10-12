@@ -42,6 +42,9 @@ def test_redeems_a_code_and_saves_both_tokens_privately_without_printing_either(
     assert (tmp_path / ".deployangel" / ".gitignore").read_text() == "*\n"
     assert "Set up DeployAngel for shop (production)" in stdout.getvalue()
     assert "not shown here" in stdout.getvalue()
+    assert "reads its token only from DEPLOYANGEL_TOKEN" in stdout.getvalue()
+    assert "setup-for-agents.md" in stdout.getvalue()
+    assert "fly secrets" not in stdout.getvalue() and "heroku config:set" not in stdout.getvalue()
     assert "da_live_" not in stdout.getvalue() + stderr.getvalue()
 
 

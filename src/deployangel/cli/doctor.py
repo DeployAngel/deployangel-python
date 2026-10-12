@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Mapping, Optional
 
+from deployangel.cli import credentials
 from deployangel.cli.client import ApiError, NotFound, Unauthorized
 from deployangel.config import Configuration
 from deployangel.core import release as release_module
@@ -115,7 +116,7 @@ class Doctor:
             return None, [Check("warn", "This DeployAngel server doesn't support doctor yet; only this checkout was checked")]
         except ApiError as error:
             return None, [Check("error", f"Couldn't reach DeployAngel: {error}")]
-        checks = [_app_check(setup), _agent_check(setup), _metadata_check(setup), *_gap_checks(setup), _progress_check(setup)]
+        checks = [_app_check(setup), _agent_check(setup, self.root), _metadata_check(setup), *_gap_checks(setup), _progress_check(setup)]
         return setup, [check for check in checks if check is not None]
 
     def _here_check(self) -> Optional[Check]:
@@ -207,7 +208,7 @@ def _app_check(setup: dict) -> Check:
     return Check("ok", f"App: {app.get('name') or ''} ({app.get('environment') or ''})")
 
 
-def _agent_check(setup: dict) -> Check:
+def _agent_check(setup: dict, root: str) -> Check:
     agent = setup.get("agent") or {}
     processes = list(agent.get("processes") or [])
     if agent.get("reporting"):
@@ -218,8 +219,23 @@ def _agent_check(setup: dict) -> Check:
     if agent.get("last_received_at"):
         return Check("warn", f"The agent last reported {_time(agent['last_received_at'])}, and nothing since",
                      "Check the app is running, and that DEPLOYANGEL_TOKEN is still set on its processes.")
-    return Check("warn", "The agent hasn't reported yet",
-                 'Deploy with DEPLOYANGEL_TOKEN set to the app\'s agent token (Settings, Tokens: "Deployed application").')
+    return Check("warn", "The agent hasn't reported yet", _token_fix(root))
+
+
+def _token_fix(root: str) -> str:
+    """The running app reads its token only from DEPLOYANGEL_TOKEN in its
+    environment, never from the file `deployangel setup` saves."""
+    if credentials.find(root):
+        if os.path.exists(os.path.join(root, "uv.lock")):
+            command = "uv run deployangel"
+        elif os.path.exists(os.path.join(root, "poetry.lock")):
+            command = "poetry run deployangel"
+        else:
+            command = "deployangel"
+        return ("Start or deploy the app with DEPLOYANGEL_TOKEN in its processes' environment. The app token is saved here, "
+                f"so pass it without printing it: $({command} token app) in the start command or your host's secrets command.")
+    return ("Start or deploy the app with DEPLOYANGEL_TOKEN in its processes' environment, set to its app token "
+            '("Deployed application" in the app\'s Settings, under API tokens).')
 
 
 def _metadata_check(setup: dict) -> Optional[Check]:

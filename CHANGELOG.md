@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Clearer setup for coding agents, from a first-day rehearsal: `setup` says
+  the running app reads its token only from `DEPLOYANGEL_TOKEN` and points to
+  the per-host steps instead of printing Fly and Heroku examples; `install
+  agents` says the saved token is used here once `setup` has run; `doctor`'s
+  fix for an agent that hasn't reported says how to pass a saved app token;
+  and the help says `release` defaults to the current commit and when
+  `--format` defaults to json.
+
 ## 0.1.14 (2026-10-12)
 
 - The MCP server's instructions, and the ones `deployangel install agents`

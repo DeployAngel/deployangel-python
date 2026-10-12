@@ -387,6 +387,16 @@ def test_install_agents_sets_up_claude_code_cursor_and_codex_in_a_bare_project(i
         assert text in out
 
 
+def test_install_agents_says_the_saved_token_is_used_once_setup_has_run(io_streams, tmp_path):
+    from deployangel.cli import credentials
+
+    credentials.write(str(tmp_path), {"api_token": "da_live_saved"})
+    out = _install_agents(io_streams, tmp_path)
+    assert "use the token `deployangel setup` saved" in out
+    assert "Teammates redeem their own setup code" in out
+    assert "need DEPLOYANGEL_API_TOKEN" not in out and "da_live_saved" not in out
+
+
 def test_install_agents_runs_deployangel_through_uv_or_poetry(io_streams, tmp_path):
     (tmp_path / "uv.lock").write_text("")
     _install_agents(io_streams, tmp_path)
@@ -778,6 +788,15 @@ class TestDoctor:
 
         self.doctor(client=client)
         assert "! The agent hasn't reported yet" in self.output()
+        assert 'set to its app token ("Deployed application" in the app\'s Settings, under API tokens)' in self.output()
+
+        # Once setup saved the app token here, the fix says how to pass it.
+        from deployangel.cli import credentials
+        self.clear()
+        credentials.write(str(self.root), {"app_token": "da_live_saved"})
+        self.doctor(client=client)
+        assert "The app token is saved here, so pass it without printing it: $(uv run deployangel token app)" in self.output()
+        assert "da_live_saved" not in self.output()
         assert ("· The Dockerfile doesn't set DEPLOYANGEL_REVISION; unless your platform passes the commit, releases won't be named by "
                 "commit\n      Run `deployangel install docker`") in self.output()
 

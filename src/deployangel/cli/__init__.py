@@ -50,7 +50,8 @@ HELP = f"""Usage: deployangel <command> [options]
              into a host's or CI's secrets
   mcp        Run the MCP server over stdio (for coding agents)
 
-With no target, verify, plan, and check use the current git HEAD commit.
+With no target, release, verify, plan, and check use the current git HEAD commit.
+--format defaults to text in a terminal and json otherwise, such as in a pipe or an agent.
 In GitHub Actions, GitLab CI, CircleCI, and Buildkite, release fills in the
 commit, a build label (e.g. run-123), and a link to the run automatically.
 In a Kamal hook, it registers Kamal's release (KAMAL_VERSION).
@@ -113,9 +114,16 @@ verdict: call the `wait_for_verification` MCP tool with the commit and
 """
 
 
+# After `deployangel setup`, the MCP server and CLI here use its saved token.
+AGENTS_SAVED_TOKEN_HELP = """Here, the MCP server and CLI use the token `deployangel setup` saved in .deployangel/.
+Teammates redeem their own setup code, or set DEPLOYANGEL_API_TOKEN to a
+"CLI & coding agents" token from the app's Settings, for example in an .envrc
+with direnv. These files hold no token and are meant to be committed.
+Codex reads .codex/config.toml only in projects you've marked as trusted."""
 AGENTS_TOKEN_HELP = """The MCP server and CLI need DEPLOYANGEL_API_TOKEN, a "CLI & coding agents" token
 from the app's Settings, in the environment your agent runs in (for example in
-an .envrc with direnv). Never put it in these files: they're meant to be committed.
+an .envrc with direnv), or a token saved here by `deployangel setup`.
+Never put it in these files: they're meant to be committed.
 Codex reads .codex/config.toml only in projects you've marked as trusted."""
 
 # Added at the end of the Dockerfile's last stage: a value that changes with
@@ -365,7 +373,8 @@ class CLI:
             self._install_codex_mcp(command),
             *self._install_agent_instructions(" ".join(command[:-1])),
         ]
-        self._print("\n".join(lines) + "\n\n" + AGENTS_TOKEN_HELP)
+        help_text = AGENTS_SAVED_TOKEN_HELP if credentials.find(self.root) else AGENTS_TOKEN_HELP
+        self._print("\n".join(lines) + "\n\n" + help_text)
         return 0
 
     def _project_command(self) -> list:
@@ -556,11 +565,11 @@ class CLI:
         self._print(f"""Set up DeployAngel for {app.get('name')} ({app.get('environment')}). Saved its app token and a "CI deploys" token to
 {relative}, kept out of git and not shown here. The deployangel command and MCP server here use them.
 
-Give production the app token without printing it, for example:
-  fly secrets set DEPLOYANGEL_TOKEN=$({command} token app)
-  heroku config:set DEPLOYANGEL_TOKEN=$({command} token app)
-and CI the "CI deploys" token:
-  {command} token api | gh secret set DEPLOYANGEL_API_TOKEN""")
+The running app reads its token only from DEPLOYANGEL_TOKEN in its environment, so give it the app
+token without printing it: $({command} token app) in the command that starts it or sets your
+host's secrets, or {command} token app | <a command that reads a secret>. The same goes for CI and
+the "CI deploys" token ({command} token api). Steps for each host:
+https://www.deployangel.com/setup-for-agents.md""")
         return 0
 
     def token(self) -> int:
