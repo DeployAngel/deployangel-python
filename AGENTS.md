@@ -62,8 +62,11 @@ together.
 
 ## Releasing
 
-Bump `src/deployangel/version.py`, rename the CHANGELOG's "Unreleased"
-heading to `## X.Y.Z (date)`, commit "Release X.Y.Z", and push a `vX.Y.Z`
-tag. `.github/workflows/release.yml` builds the package, waits for a
+Run `bin/release X.Y.Z --push` from an up-to-date `main` with the changes
+under the CHANGELOG's "## Unreleased" heading. It checks X.Y.Z is newer
+than PyPI's latest, sets `src/deployangel/version.py`, dates the CHANGELOG
+section, runs the tests, commits "Release X.Y.Z", tags `vX.Y.Z`, and
+pushes. `.github/workflows/release.yml` builds the package, waits for a
 maintainer to approve the `pypi` environment, publishes to PyPI through
 trusted publishing (no API token), and then creates the GitHub release.
+Without `--push`, it stops after tagging.

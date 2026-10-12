@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# Prepares a release of the package: bin/release 0.1.15 [--push]
+#
+# Checks the version is newer than the one on PyPI, sets it in
+# src/deployangel/version.py, dates CHANGELOG.md's "## Unreleased" section,
+# runs the tests, commits "Release 0.1.15", and tags v0.1.15. With --push it
+# pushes main and the tag, which starts .github/workflows/release.yml: the
+# package is published once a maintainer approves the pypi environment.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+die() { echo "bin/release: $*" >&2; exit 1; }
+
+version="${1:-}"
+push="${2:-}"
+[[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Usage: bin/release X.Y.Z [--push]" >&2; exit 64; }
+[[ -z "$push" || "$push" == "--push" ]] || { echo "Usage: bin/release X.Y.Z [--push]" >&2; exit 64; }
+
+[[ "$(git branch --show-current)" == "main" ]] || die "release from main."
+[[ -z "$(git status --porcelain)" ]] || die "commit your changes first."
+git fetch -q origin main --tags
+git merge-base --is-ancestor origin/main HEAD || die "main is behind origin/main. Pull first."
+! git rev-parse -q --verify "refs/tags/v$version" > /dev/null || die "tag v$version already exists."
+grep -q '^## Unreleased$' CHANGELOG.md || die 'CHANGELOG.md has no "## Unreleased" section to release.'
+
+published=$(curl -fsS https://pypi.org/pypi/deployangel/json | python3 -c 'import json, sys; print(json.load(sys.stdin)["info"]["version"])')
+python3 -c 'import sys; v = lambda s: tuple(int(p) for p in s.split(".")); sys.exit(0 if v(sys.argv[1]) > v(sys.argv[2]) else 1)' "$version" "$published" ||
+  die "$version isn't newer than $published, the latest on PyPI."
+
+sed -i.bak "s/^VERSION = \".*\"$/VERSION = \"$version\"/" src/deployangel/version.py && rm src/deployangel/version.py.bak
+sed -i.bak "s/^## Unreleased$/## $version ($(date +%Y-%m-%d))/" CHANGELOG.md && rm CHANGELOG.md.bak
+grep -q "VERSION = \"$version\"" src/deployangel/version.py || die "couldn't set the version in src/deployangel/version.py."
+
+pytest=pytest
+[[ -x .venv/bin/pytest ]] && pytest=.venv/bin/pytest
+if ! "$pytest" -q; then
+  git checkout -- src/deployangel/version.py CHANGELOG.md
+  die "tests failed; nothing was committed."
+fi
+
+git commit -q -am "Release $version"
+git tag "v$version"
+echo "Committed and tagged v$version."
+
+if [[ "$push" == "--push" ]]; then
+  git push -q origin main "v$version"
+  echo "Pushed. Approve the pypi environment in the Release workflow to publish:"
+  echo "  https://github.com/DeployAngel/deployangel-python/actions/workflows/release.yml"
+else
+  echo "To publish: git push origin main v$version, then approve the pypi environment."
+fi
