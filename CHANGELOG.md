@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.13 (2026-10-11)
 
 - `deployangel setup --code=CODE` redeems a one-time code from "Set up with
   your coding agent" and saves the app's token and a "CI deploys" token to
