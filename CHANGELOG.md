@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.16 (2026-10-16)
 
 - Reports jobs still running at the end of each minute, and how long the
   oldest of each task has been running, for Celery and RQ, so DeployAngel can
