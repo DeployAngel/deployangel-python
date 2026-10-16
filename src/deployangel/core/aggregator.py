@@ -28,7 +28,10 @@ class RouteStats:
 
 
 class JobStats:
-    __slots__ = ("processed", "failed", "discarded", "duration", "queue_latency")
+    """running and oldest_running_ms: jobs still running as the period is
+    sent, and how long the oldest had been running at its end."""
+
+    __slots__ = ("processed", "failed", "discarded", "duration", "queue_latency", "running", "oldest_running_ms")
 
     def __init__(self) -> None:
         self.processed = 0
@@ -36,6 +39,12 @@ class JobStats:
         self.discarded = 0
         self.duration = Histogram()
         self.queue_latency = Histogram()
+        self.running = 0
+        self.oldest_running_ms: Optional[int] = None
+
+    def add_running(self, count: int, oldest_ms: int) -> None:
+        self.running += count
+        self.oldest_running_ms = oldest_ms if self.oldest_running_ms is None else max(self.oldest_running_ms, oldest_ms)
 
     def record(self, failed: bool, discarded: bool, duration_ms: float, queue_latency_ms: Optional[float]) -> None:
         self.processed += 1
@@ -96,6 +105,12 @@ class Period:
         if stats is None:
             stats = self.job_classes[key] = JobStats()
         return stats
+
+    def record_running(self, job_class: str, count: int, oldest_ms: int, max_classes: int) -> None:
+        """A class with jobs running and none finished is listed too, so a job
+        that hangs is reported."""
+        self.jobs.add_running(count, oldest_ms)
+        self.job_stats(job_class, max_classes).add_running(count, oldest_ms)
 
     def record_checkpoint(self, name: str, count: int, unit_of_work: Optional[str] = None) -> None:
         key = _bounded_key(self.checkpoints, name, MAX_CHECKPOINTS)

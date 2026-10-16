@@ -130,6 +130,16 @@ def record_job(job_class: str, duration_ms: float, failed: bool = False, discard
         _agent.record_job(job_class, duration_ms, failed=failed, discarded=discarded, queue_latency_ms=queue_latency_ms)
 
 
+def job_started(job_class: str) -> Optional[object]:
+    """Marks a job as running; pass the token returned to job_finished()."""
+    return _agent.job_started(job_class) if _agent is not None else None
+
+
+def job_finished(token: Optional[object]) -> None:
+    if _agent is not None:
+        _agent.job_finished(token)
+
+
 def record_exception(exception: BaseException, source: Optional[str] = None, handled: bool = False) -> None:
     if _agent is not None:
         _agent.record_exception(exception, source=source, handled=handled)

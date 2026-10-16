@@ -456,3 +456,29 @@ def test_configuration_ignores_head_with_the_get_route():
     assert config.is_ignored_route("GET /healthz/")
     assert config.is_ignored_route("HEAD /healthz/")
     assert not config.is_ignored_route("POST /healthz/")
+
+
+def test_running_jobs_report_each_class_and_its_oldest_job(fake_clock):
+    from deployangel.core.running import RunningJobs
+
+    running = RunningJobs(clock=fake_clock)
+    first = running.start("shop.tasks.import")
+    fake_clock.advance(30)
+    running.start("shop.tasks.import")
+    running.start("shop.tasks.mail")
+    assert running.snapshot(fake_clock() + 15) == {"shop.tasks.import": (2, 45000), "shop.tasks.mail": (1, 15000)}
+    assert running.snapshot(fake_clock() - 31) == {}
+
+    running.finish(first)
+    running.finish(None)
+    assert running.snapshot(fake_clock()) == {"shop.tasks.import": (1, 0), "shop.tasks.mail": (1, 0)}
+
+
+def test_running_jobs_stop_tracking_past_their_limit(fake_clock, monkeypatch):
+    from deployangel.core import running as module
+
+    monkeypatch.setattr(module, "MAX", 2)
+    running = module.RunningJobs(clock=fake_clock)
+    for _ in range(3):
+        running.start("shop.tasks.import")
+    assert running.snapshot(fake_clock()) == {"shop.tasks.import": (2, 0)}

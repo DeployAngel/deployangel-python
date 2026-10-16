@@ -315,6 +315,37 @@ def test_a_named_release_skips_the_fingerprint(fake_clock, tmp_path):
     assert metadata.builds == 0 and agent._transport.telemetry()[0]["release"]["source"] == "config"
 
 
+def test_reports_jobs_still_running_on_the_latest_minute_only(fake_clock):
+    agent = make_agent(fake_clock)
+    fake_clock.advance(-10)  # 14:00:00
+    hanging = agent.job_started("shop.tasks.import")
+    agent.record_job("shop.tasks.mail", 12)
+    fake_clock.advance(125)  # 14:02:05, so 14:00 and 14:01 have ended
+    agent.job_finished(agent.job_started("shop.tasks.mail"))
+    assert agent.flush() == 2
+
+    first, latest = agent._transport.telemetry()
+    assert "running" not in first["jobs"]
+    assert latest["jobs"]["running"] == 1 and latest["jobs"]["oldest_running_ms"] == 120000
+    (entry,) = latest["job_classes"]
+    assert entry["key"] == "shop.tasks.import"
+    assert (entry["processed"], entry["running"], entry["oldest_running_ms"]) == (0, 1, 120000)
+    assert "queue_backlog" not in latest["jobs"]
+
+    agent.job_finished(hanging)
+    fake_clock.advance(60)
+    agent.flush()
+    assert agent._transport.telemetry()[-1]["job_classes"] == []
+
+
+def test_a_forked_child_runs_none_of_its_parents_jobs(fake_clock):
+    agent = make_agent(fake_clock)
+    agent.job_started("shop.tasks.import")
+    agent.after_fork()
+    agent.shutdown()
+    assert "running" not in agent._transport.telemetry()[-1]["jobs"]
+
+
 def test_shutdown_sends_the_minute_in_progress(fake_clock):
     agent = make_agent(fake_clock)
     agent.record_request("GET /", 200, 1)

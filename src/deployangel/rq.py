@@ -41,10 +41,14 @@ class InstrumentedWorkerMixin:
         # Set before RQ forks a work horse, which inherits it, so the job runs
         # inside it with either worker class.
         unit = work.begin(work.JOB)
+        # Tracked here, in the worker that waits on the horse, which outlives
+        # a horse that hangs.
+        running = deployangel.job_started(_job_name(job))
         try:
             return super().execute_job(job, queue)
         finally:
             work.end(unit)
+            deployangel.job_finished(running)
             record(job, started, retries_left)
 
 
@@ -56,9 +60,16 @@ class SimpleWorker(InstrumentedWorkerMixin, rq.SimpleWorker):
     pass
 
 
+def _job_name(job) -> str:
+    try:
+        return str(job.func_name or "unknown")
+    except Exception:
+        return "unknown"
+
+
 def record(job, started: float, retries_left: Optional[int]) -> None:
     try:
-        name = str(job.func_name or "unknown")
+        name = _job_name(job)
         duration_ms = (time.perf_counter() - started) * 1000.0
         try:
             job.refresh()

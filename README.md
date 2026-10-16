@@ -135,6 +135,8 @@ doesn't invalidate cached layers, and you build with
 - Background jobs: attempts, failed attempts, discarded jobs, duration, and
   queue latency, per task. For queue latency, Celery task messages carry one
   extra header, `deployangel_published_at`, the time they were sent.
+- Tasks still running at the end of each minute, and how long the oldest of
+  each has been running, so a task that hangs is noticed.
 - Release identity, runtime versions, and a per-process instance ID.
 - Exceptions: a stable fingerprint, the exception class, the first line of the
   message, and application frames only (file paths and function names). In

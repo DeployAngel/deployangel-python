@@ -53,13 +53,17 @@ def telemetry(period: Period, instance, release, runtime: dict, capabilities: li
 
 
 def job_stats(stats: JobStats) -> dict:
-    return {
+    """running and oldest_running_ms only when jobs were running."""
+    fields = {
         "processed": stats.processed,
         "failed": stats.failed,
         "discarded": stats.discarded,
         "duration_histogram": stats.duration.to_protocol(),
         "queue_latency_histogram": stats.queue_latency.to_protocol(),
     }
+    if stats.running:
+        fields.update(running=stats.running, oldest_running_ms=stats.oldest_running_ms)
+    return fields
 
 
 def runtime(framework: Optional[str] = None, framework_version: Optional[str] = None) -> dict:

@@ -12,9 +12,10 @@ from typing import Callable, Mapping, Optional
 
 from deployangel.core import fingerprint, protocol, redaction, work
 from deployangel.core import release as release_module
-from deployangel.core.aggregator import Aggregator
+from deployangel.core.aggregator import PERIOD_SECONDS, Aggregator
 from deployangel.core.buffer import Buffer
 from deployangel.core.instance import Instance
+from deployangel.core.running import RunningJobs
 from deployangel.core.transport import Transport, encode
 
 TELEMETRY_PATH = "/api/v1/telemetry"
@@ -80,6 +81,27 @@ class Agent:
         except Exception as error:
             self._warn_once("record_job", f"DeployAngel failed to record a job: {type(error).__name__}: {error}")
 
+    def job_started(self, job_class: str) -> Optional[object]:
+        """Marks a job as running until job_finished(), so one that hangs is
+        still reported. Returns the token to pass to it."""
+        if not self.active:
+            return None
+        try:
+            self._check_fork()
+            self.start_reporter()
+            return self._running_jobs.start(job_class)
+        except Exception as error:
+            self._warn_once("job_started", f"DeployAngel failed to record a running job: {type(error).__name__}: {error}")
+            return None
+
+    def job_finished(self, token: Optional[object]) -> None:
+        if token is None:
+            return
+        try:
+            self._running_jobs.finish(token)
+        except Exception as error:
+            self._warn_once("job_finished", f"DeployAngel failed to record a finished job: {type(error).__name__}: {error}")
+
     def record_discard(self, job_class: str) -> None:
         if not self.active:
             return
@@ -138,6 +160,8 @@ class Agent:
             return 0
         try:
             periods = self._aggregator.drain(include_current=include_current, max_periods=self.config.max_queued_payloads)
+            if periods:
+                self._add_running(periods[-1])
             release = self._resolved_release() if periods else None
             for period in periods:
                 self._buffer.push(encode(protocol.telemetry(period, self.instance, release, self.runtime, self.capabilities)))
@@ -217,6 +241,16 @@ class Agent:
                 self._warn_about_release()
         return self.release
 
+    def _add_running(self, period) -> None:
+        """What's still running, on the latest period only: as of its end, or
+        now for the in-progress one at shutdown."""
+        try:
+            ended_at = min(period.started_at + PERIOD_SECONDS, self._clock())
+            for job_class, (count, oldest_ms) in self._running_jobs.snapshot(ended_at).items():
+                period.record_running(job_class, count, oldest_ms, self.config.max_routes)
+        except Exception as error:
+            self._warn_once("running_jobs", f"DeployAngel failed to read running jobs: {type(error).__name__}: {error}")
+
     def _warn_about_release(self) -> None:
         if self.release.unknown:
             self._warn_once("unknown_release", "DeployAngel could not determine the release; set DEPLOYANGEL_REVISION "
@@ -235,6 +269,7 @@ class Agent:
         self._pid = os.getpid()
         self.instance = Instance(env=self._env, now=self._clock())
         self._aggregator = Aggregator(max_routes=self.config.max_routes, clock=self._clock)
+        self._running_jobs = RunningJobs(clock=self._clock)
         self._buffer = Buffer(self.config.max_queued_payloads)
         self._paused_until: Optional[float] = None
         self._metadata_sent = False

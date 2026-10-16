@@ -42,6 +42,10 @@ def celery_app():
         deployangel.checkpoint("order.fulfilled")
         return order_id
 
+    @app.task(name="shop.tasks.inspect")
+    def inspect():
+        return running_now()
+
     @app.task(name="shop.tasks.sync", bind=True, max_retries=1)
     def sync(self):
         if self.request.retries == 0:
@@ -49,6 +53,13 @@ def celery_app():
         return "ok"
 
     return app
+
+
+def running_now():
+    """{job_class: [running, oldest_running_ms]} as the agent sees it now."""
+    import time
+
+    return {key: list(value) for key, value in deployangel.agent()._running_jobs.snapshot(time.time()).items()}
 
 
 @pytest.fixture
@@ -83,6 +94,16 @@ def test_celery_records_each_task_attempt_with_queue_latency(celery_agent, celer
     assert (receipt["processed"], receipt["failed"], receipt["discarded"]) == (2, 0, 0)
     assert sum(receipt["queue_latency_histogram"]["counts"].values()) == 2
     assert "jobs" in payload["capabilities"]
+
+
+def test_celery_a_task_counts_as_running_until_it_ends(celery_agent, celery_app):
+    from celery.contrib.testing.worker import start_worker
+
+    with start_worker(celery_app, pool="solo", perform_ping_check=False, shutdown_timeout=10):
+        during = celery_app.tasks["shop.tasks.inspect"].delay().get(timeout=10)
+        celery_app.tasks["shop.tasks.charge"].delay(1).get(timeout=10, propagate=False)
+    assert list(during) == ["shop.tasks.inspect"] and during["shop.tasks.inspect"][0] == 1
+    assert running_now() == {}
 
 
 def test_celery_failures_are_discarded_with_their_exception(celery_agent, celery_app):
@@ -175,7 +196,7 @@ def test_celery_lists_tasks_and_beat_schedules(celery_agent, celery_app):
     }
     source = CelerySource()
     assert set(source.job_classes()) == {"shop.tasks.send_receipt", "shop.tasks.charge", "shop.tasks.sync",
-                                         "shop.tasks.fulfil"}
+                                         "shop.tasks.fulfil", "shop.tasks.inspect"}
     schedules = {s["key"]: s for s in source.schedules()}
     assert schedules["nightly receipts"] == {"key": "nightly receipts", "class": "shop.tasks.send_receipt",
                                              "source": "celery_beat", "time_zone": "Europe/Berlin", "schedule": "30 2,14 * * *"}
@@ -243,6 +264,22 @@ def test_rq_records_jobs_and_parses_failures_from_tracebacks(started_agent, rq_q
     assert exception["top_frame"] == "tests/test_jobs.py#failing_charge"
     assert exception["sources"] == {"job_class:test_jobs.failing_charge": 2}
     assert "jobs" in payload["capabilities"]
+
+
+def inspect_running():
+    return running_now()
+
+
+def test_rq_a_job_counts_as_running_until_it_ends(started_agent, rq_queue):
+    import deployangel.rq
+
+    started_agent(framework="rq")
+    job = rq_queue.enqueue(inspect_running)
+    rq_queue.enqueue(failing_charge, 1)
+    deployangel.rq.SimpleWorker([rq_queue], connection=rq_queue.connection).work(burst=True)
+    during = job.return_value()
+    assert list(during) == ["test_jobs.inspect_running"] and during["test_jobs.inspect_running"][0] == 1
+    assert running_now() == {}
 
 
 def test_rq_checkpoints_count_as_recorded_in_a_job(started_agent, rq_queue):

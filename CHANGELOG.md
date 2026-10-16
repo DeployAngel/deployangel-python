@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Reports jobs still running at the end of each minute, and how long the
+  oldest of each task has been running, for Celery and RQ, so DeployAngel can
+  fail a release in which a task hangs while every task that finishes still
+  succeeds. Needs a DeployAngel cloud that understands the new fields; older
+  ones ignore them.
+
 ## 0.1.15 (2026-10-12)
 
 - Clearer setup for coding agents, from a first-day rehearsal: `setup` says
