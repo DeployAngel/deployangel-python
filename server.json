@@ -1,6 +1,6 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.DeployAngel/deployangel",
+  "name": "com.deployangel/deployangel",
   "title": "DeployAngel",
   "description": "Wait for production to clear each deploy, and read the evidence when a release fails.",
   "websiteUrl": "https://www.deployangel.com",
@@ -8,12 +8,12 @@
     "url": "https://github.com/DeployAngel/deployangel-python",
     "source": "github"
   },
-  "version": "0.1.18",
+  "version": "0.1.19",
   "packages": [
     {
       "registryType": "pypi",
       "identifier": "deployangel",
-      "version": "0.1.18",
+      "version": "0.1.19",
       "runtimeHint": "uvx",
       "transport": {
         "type": "stdio"

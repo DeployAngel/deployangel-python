@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.19 (2026-10-21)
+
+- The MCP server is listed in the official MCP Registry as
+  `com.deployangel/deployangel`, a name proven by deployangel.com's DNS.
+
 ## 0.1.18 (2026-10-21)
 
 - The MCP server is listed in the official MCP Registry as

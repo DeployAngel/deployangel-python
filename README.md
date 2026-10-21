@@ -1,5 +1,6 @@
 # DeployAngel for Python
 
+<!-- mcp-name: com.deployangel/deployangel -->
 <!-- mcp-name: io.github.DeployAngel/deployangel -->
 
 The DeployAngel agent for Django, FastAPI, Starlette, and Flask, with Celery
