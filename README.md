@@ -1,5 +1,7 @@
 # DeployAngel for Python
 
+<!-- mcp-name: io.github.DeployAngel/deployangel -->
+
 The DeployAngel agent for Django, FastAPI, Starlette, and Flask, with Celery
 and RQ jobs. It watches what your app does in production and reports one
 small aggregated payload per process per minute. DeployAngel uses that to

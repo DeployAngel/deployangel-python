@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.18 (2026-10-21)
+
+- The MCP server is listed in the official MCP Registry as
+  `io.github.DeployAngel/deployangel`, so MCP clients and directories that read
+  the registry can find and install it (`uvx deployangel mcp`). The README
+  carries the registry name, which is how the registry confirms the package is
+  ours.
+
 ## 0.1.17 (2026-10-21)
 
 - The instructions `deployangel install agents` writes to `AGENTS.md` now tell
