@@ -110,6 +110,13 @@ verdict: call the `wait_for_verification` MCP tool with the commit and
   coverage and a full baseline), so don't call a medium clearance weak.
   Warnings (`suspicious: true`) aren't failures: report them as "watching
   closely:" and the `watching_closely` items, never as "suspicious".
+- After deploying a fix for a failed release, read `fix_check` in the verdict
+  (`--format=json` with the CLI): `fixed` means every earlier problem is
+  healthy again. Otherwise report what's still happening or not confirmed yet.
+- At the start of a session, before changing code: call `list_deployments`
+  and `list_late_regressions` (or run `{command} status`). If a recent release
+  failed, isn't cleared yet, or has a late regression, mention it before other
+  work.
 {AGENTS_END}
 """
 
