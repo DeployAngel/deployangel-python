@@ -30,16 +30,20 @@ jobs:
             packages: >-
               django djangorestframework django-celery-beat django-crontab
               fastapi flask celery rq httpx pytest-asyncio
-    services:
-      redis:
-        image: public.ecr.aws/docker/library/redis:7
-        ports: [ "6379:6379" ]
     env:
       RQ_REDIS_URL: redis://localhost:6379/15
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
+
+      # From Ubuntu's own mirror, not a container: anonymous pulls hit rate
+      # limits on Docker Hub, and then data limits on AWS's public mirror.
+      - name: Start Redis
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q redis-server
+          redis-cli ping
 
       - name: Set up Python
         uses: actions/setup-python@v6
