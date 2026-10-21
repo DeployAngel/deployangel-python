@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.17 (2026-10-21)
 
 - The instructions `deployangel install agents` writes to `AGENTS.md` now tell
   coding agents to check recent releases and late regressions at the start
