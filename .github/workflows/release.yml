@@ -2,7 +2,8 @@ name: Release
 
 # Pushing a version tag (v0.1.0) builds the package, publishes it to PyPI
 # once a maintainer approves the pypi environment, and then creates a GitHub
-# release whose notes are that version's section of CHANGELOG.md.
+# release whose notes are that version's section of CHANGELOG.md and updates
+# the MCP Registry listing (com.deployangel/deployangel) to the new version.
 #
 # PyPI trusts this workflow directly (trusted publishing), so there's no API
 # token anywhere: PyPI's publisher for the deployangel project names this
@@ -108,3 +109,50 @@ jobs:
           ' CHANGELOG.md > notes.md
 
           gh release create "$TAG" dist/* --title "deployangel (Python) $version" --notes-file notes.md
+
+  # The MCP Registry lists the MCP server by the PyPI version it installs, and
+  # checks that version's README carries the listing's name. Logging in with
+  # deployangel.com's key (the DNS record "v=MCPv1; k=ed25519; ...") is what
+  # allows publishing under com.deployangel.
+  mcp-registry:
+    needs: publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set the version in server.json
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="${TAG#v}"
+          jq --arg v "$version" '.version = $v | .packages[].version = $v' server.json > server.tmp && mv server.tmp server.json
+
+      - name: Wait for PyPI to serve the release
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="${TAG#v}"
+          for attempt in $(seq 1 30); do
+            if curl -fsS "https://pypi.org/pypi/deployangel/$version/json" | grep -q "mcp-name: com.deployangel/deployangel"; then
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::PyPI doesn't serve deployangel $version with the registry name in its README yet."
+          exit 1
+
+      - name: Install mcp-publisher
+        run: |
+          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_linux_amd64.tar.gz" | tar xz mcp-publisher
+
+      - name: Publish to the MCP Registry
+        env:
+          MCP_PRIVATE_KEY: ${{ secrets.MCP_PRIVATE_KEY }}
+        run: |
+          if [ -z "$MCP_PRIVATE_KEY" ]; then
+            echo "::error::The MCP_PRIVATE_KEY secret isn't set, so the MCP Registry listing wasn't updated."
+            exit 1
+          fi
+          ./mcp-publisher login dns --domain deployangel.com --private-key "$MCP_PRIVATE_KEY"
+          ./mcp-publisher publish

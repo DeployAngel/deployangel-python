@@ -68,5 +68,9 @@ than PyPI's latest, sets `src/deployangel/version.py`, dates the CHANGELOG
 section, runs the tests, commits "Release X.Y.Z", tags `vX.Y.Z`, and
 pushes. `.github/workflows/release.yml` builds the package, waits for a
 maintainer to approve the `pypi` environment, publishes to PyPI through
-trusted publishing (no API token), and then creates the GitHub release.
-Without `--push`, it stops after tagging.
+trusted publishing (no API token), and then creates the GitHub release and
+updates the MCP Registry listing (`com.deployangel/deployangel`, from
+`server.json`, which `bin/release` keeps at the new version). The registry
+login uses the `MCP_PRIVATE_KEY` secret, the hex Ed25519 key behind
+deployangel.com's `v=MCPv1` DNS record. Without `--push`, it stops after
+tagging.

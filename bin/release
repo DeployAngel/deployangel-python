@@ -30,11 +30,22 @@ python3 -c 'import sys; v = lambda s: tuple(int(p) for p in s.split(".")); sys.e
 sed -i.bak "s/^VERSION = \".*\"$/VERSION = \"$version\"/" src/deployangel/version.py && rm src/deployangel/version.py.bak
 sed -i.bak "s/^## Unreleased$/## $version ($(date +%Y-%m-%d))/" CHANGELOG.md && rm CHANGELOG.md.bak
 grep -q "VERSION = \"$version\"" src/deployangel/version.py || die "couldn't set the version in src/deployangel/version.py."
+# The MCP Registry listing names the PyPI version it installs.
+python3 - "$version" <<'PY' || die "couldn't set the version in server.json."
+import json, sys
+with open("server.json") as file:
+    server = json.load(file)
+server["version"] = sys.argv[1]
+for package in server["packages"]:
+    package["version"] = sys.argv[1]
+with open("server.json", "w") as file:
+    file.write(json.dumps(server, indent=2, ensure_ascii=False) + "\n")
+PY
 
 pytest=pytest
 [[ -x .venv/bin/pytest ]] && pytest=.venv/bin/pytest
 if ! "$pytest" -q; then
-  git checkout -- src/deployangel/version.py CHANGELOG.md
+  git checkout -- src/deployangel/version.py CHANGELOG.md server.json
   die "tests failed; nothing was committed."
 fi
 
