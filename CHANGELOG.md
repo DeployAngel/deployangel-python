@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.20 (2026-10-21)
 
 - `deployangel mcp` starts without an API token. Each tool then answers with
   how to set `DEPLOYANGEL_API_TOKEN` (or run `deployangel setup`), instead of
