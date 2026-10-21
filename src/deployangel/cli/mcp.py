@@ -43,6 +43,10 @@ TARGET_PROPERTIES = {
     "latest": {"type": "boolean", "description": "Use the most recent deployment."},
 }
 
+MISSING_TOKEN = ("DeployAngel has no API token yet. Set DEPLOYANGEL_API_TOKEN to a \"CLI & coding agents\" token from "
+                 "your app's Settings in DeployAngel, or run `deployangel setup` in the project, then restart this MCP "
+                 "server.")
+
 ERROR_CODES = {"parse": -32700, "invalid": -32600, "method": -32601, "params": -32602, "internal": -32603}
 
 MEANINGS = {
@@ -57,8 +61,10 @@ MEANINGS = {
 
 class Server:
     def __init__(self, client, input=None, output=None, error_output=None, sleeper: Callable[[float], None] = time.sleep,
-                 clock: Callable[[], float] = time.time, git_head: Callable[[], Optional[str]] = lambda: None):
+                 clock: Callable[[], float] = time.time, git_head: Callable[[], Optional[str]] = lambda: None,
+                 token_missing: bool = False):
         self.client = client
+        self.token_missing = token_missing
         self.input = input or sys.stdin
         self.output = output or sys.stdout
         self.error_output = error_output or sys.stderr
@@ -149,6 +155,8 @@ class Server:
         }
 
     def _call_tool(self, name, arguments: dict) -> dict:
+        if self.token_missing:
+            return {"content": [{"type": "text", "text": MISSING_TOKEN}], "isError": True}
         try:
             if name == "get_verification":
                 content = self._verification_content(self._waiter().wait(self._target(arguments), wait=False))

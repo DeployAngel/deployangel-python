@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- `deployangel mcp` starts without an API token. Each tool then answers with
+  how to set `DEPLOYANGEL_API_TOKEN` (or run `deployangel setup`), instead of
+  the server failing to start, which many coding agents only report as
+  "failed to start".
+
 ## 0.1.19 (2026-10-21)
 
 - The MCP server is listed in the official MCP Registry as

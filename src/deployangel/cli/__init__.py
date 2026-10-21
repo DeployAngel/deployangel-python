@@ -534,8 +534,15 @@ class CLI:
     def mcp(self) -> int:
         from deployangel.cli.mcp import Server
 
+        # Without a token the server still starts, and each tool says how to
+        # set one: many agents only report a server that won't start as
+        # "failed to start", with no reason.
+        token = self.env.get("DEPLOYANGEL_API_TOKEN") or self._saved().get("api_token")
+        if not token:
+            self.stderr.write("deployangel mcp: no API token yet; each tool will say how to set one.\n")
+            self._client = Client(None, self._endpoint(), require_token=False)
         Server(self.client(), input=self.stdin, output=self.stdout, error_output=self.stderr,
-               sleeper=self.sleeper, clock=self.clock, git_head=self.git_head).run()
+               sleeper=self.sleeper, clock=self.clock, git_head=self.git_head, token_missing=not token).run()
         return 0
 
     def client(self):

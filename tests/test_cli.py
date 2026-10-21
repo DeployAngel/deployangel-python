@@ -615,6 +615,24 @@ class TestMcp:
         assert [json.loads(line) for line in output.getvalue().splitlines()] == [{"jsonrpc": "2.0", "id": 1, "result": {}}]
 
 
+def test_the_mcp_server_starts_without_a_token_and_each_tool_says_how_to_set_one(tmp_path):
+    requests = [{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18"}},
+                {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+                {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "get_verification", "arguments": {}}}]
+    stdin = io.StringIO("".join(json.dumps(request) + "\n" for request in requests))
+    stdout, stderr = io.StringIO(), io.StringIO()
+
+    assert CLI(["mcp"], env={}, stdin=stdin, stdout=stdout, stderr=stderr, root=str(tmp_path), git_head=False).run() == 0
+
+    responses = {response["id"]: response for response in map(json.loads, stdout.getvalue().splitlines())}
+    assert responses[1]["result"]["serverInfo"]["name"] == "deployangel"
+    assert "wait_for_verification" in [tool["name"] for tool in responses[2]["result"]["tools"]]
+    result = responses[3]["result"]
+    assert result["isError"] is True
+    assert "Set DEPLOYANGEL_API_TOKEN to a \"CLI & coding agents\" token" in result["content"][0]["text"]
+    assert "no API token yet" in stderr.getvalue()
+
+
 def _exercise_document():
     plan = exercise_plan()
     plan["items"] = plan["items"] + [
