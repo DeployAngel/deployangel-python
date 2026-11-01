@@ -22,7 +22,8 @@ MAX_WAIT_SECONDS = 300
 INSTRUCTIONS = """DeployAngel verifies deployments in production. After deploying, call wait_for_verification
 with until "initial" (about 15 minutes) or "verdict". Verdicts: verified means cleared, so you may
 report the release as successful. inconclusive means NOT verified: never report it as success.
-failed means production regressed: read the findings and exceptions and investigate.
+failed means production regressed: read the findings and exceptions and investigate. next_steps
+names the last cleared release a rollback would go to and the migrations it would cross.
 Confidence medium clears a release just as high does (high also needs 80% coverage and a full
 baseline): never call a medium clearance weak. suspicious true means warnings DeployAngel is
 watching closely, not a failure: report them as "watching closely:" and the watching_closely items,

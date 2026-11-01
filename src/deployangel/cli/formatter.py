@@ -126,6 +126,9 @@ def sections(document: dict) -> list:
         ("Changed but not yet exercised", [item.get("key") for item in changed]),
         ("To clear sooner, exercise (deployangel plan for details)", exercisable_items(document)[:5]),
         ("Late regressions", [late.get("summary") for late in document.get("late_regressions") or []]),
+        # A failed release's rollback target and where to look first
+        # (servers from 2026-11-01 send them).
+        ("Next steps", [step.get("text") for step in document.get("next_steps") or []]),
     ]
     return [(title, items) for title, items in found if items]
 

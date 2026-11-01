@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- `deployangel verify` prints a failed release's next steps: the last
+  cleared release a rollback would go to, with the migrations it would
+  cross, and where to look first. They come from the verdict document's new
+  `next_steps` field, so servers before 2026-11-01 show none. The coding
+  agent instructions mention them, and still say to ask before rolling back.
+
 ## 0.1.20 (2026-10-21)
 
 - `deployangel mcp` starts without an API token. Each tool then answers with
