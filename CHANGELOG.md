@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.22 (2026-11-01)
 
 - `deployangel exercise` prints each route's status codes (`404 ×1`)
   instead of their class (`1 4xx`). When every page answers 404, 405, or
