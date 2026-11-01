@@ -35,7 +35,8 @@ HELP = f"""Usage: deployangel <command> [options]
   plan       What to exercise so a release  [--commit=SHA | --version=V | --deployment=ID]
              clears sooner                  [--format=text|json]
   exercise   Send the plan's read-only      --url=PRODUCTION_URL [--commit=SHA | --version=V | --deployment=ID]
-             requests to production         [--max-requests=200] [--dry-run]
+             requests to production         [--param=NAME=VALUE] [--header="Name: value"]
+                                            [--max-requests=200] [--dry-run]
   exception  Details for a fingerprint      deployangel exception FINGERPRINT
   check      Report a smoke test result     --name=NAME --status=pass|fail [--covers=a,b]
                                             [--commit=SHA | --deployment=ID] [--details-url=URL]
@@ -105,8 +106,9 @@ verdict: call the `wait_for_verification` MCP tool with the commit and
   If its status is "exercisable" or "waiting_for_activity", run
   `{command} exercise --url=<production URL>`: it sends the
   plan's read-only requests and records them on the release. Offer to
-  exercise what it skips: routes that change data only with a test account
-  or after asking. If the status is "warm_up", nothing run can clear it.
+  exercise what it skips: fill a route's IDs with `--param name=value`,
+  using an ID you can see in the app, and run routes that change data only
+  with a test account or after asking. If the status is "warm_up", nothing run can clear it.
 - Confidence `medium` clears a release just as `high` does (high also needs 80%
   coverage and a full baseline), so don't call a medium clearance weak.
   Warnings (`suspicious: true`) aren't failures: report them as "watching
@@ -278,14 +280,23 @@ class CLI:
         sent on the release (spec §16, Exercise records)."""
         from datetime import datetime, timezone
 
-        from deployangel.cli.exerciser import MAX_REQUESTS, Exerciser
+        from deployangel.cli.exerciser import MAX_REQUESTS, Exerciser, parse_headers, parse_params
 
         parser = self._parser([("--url",), ("--commit",), ("--version",), ("--deployment", "deployment_id")])
         parser.add_argument("--max-requests", dest="max_requests", type=int, default=MAX_REQUESTS)
         parser.add_argument("--dry-run", dest="dry_run", action="store_true")
+        parser.add_argument("--header", dest="headers", action="append", default=[])
+        parser.add_argument("--param", dest="params", action="append", default=[])
         options = vars(parser.parse_args(self.argv))
         if not re.match(r"\Ahttps?://[^/\s]+", options["url"] or ""):
             return self._usage_error("exercise needs --url, the app's production URL, like https://example.com")
+        # DEPLOYANGEL_EXERCISE_HEADERS, one per line, keeps a secret out of
+        # shell history and the process list.
+        try:
+            headers = parse_headers(options["headers"] + (self.env.get("DEPLOYANGEL_EXERCISE_HEADERS") or "").split("\n"))
+            params = parse_params(options["params"])
+        except ValueError as error:
+            return self._usage_error(str(error))
         target = self._target(options)
         if not target:
             return self._usage_error("no target: pass --commit, --version, or --deployment, or run inside a git repository")
@@ -301,13 +312,13 @@ class CLI:
             return 0
 
         exerciser = Exerciser(options["url"], max_requests=min(max(options["max_requests"], 1), MAX_REQUESTS),
-                              sleeper=self.sleeper, requester=self.requester)
+                              sleeper=self.sleeper, requester=self.requester, headers=headers, params=params)
+        header_names = [f"With headers: {', '.join(headers)} (values not shown)"] if headers else []
         if options["dry_run"]:
             targets, skipped = exerciser.plan(plan)
             lines = [f"Would send {sum(t.count for t in targets)} requests:"]
             lines += [f"  {exerciser.url_for(t.path)} ×{t.count}" for t in targets]
-            if skipped:
-                lines += ["Skipped:"] + [f"  {s['key']} ({s['reason']})" for s in skipped]
+            lines += header_names + self._skipped_lines(skipped)
             self._print("\n".join(lines))
             return 0
 
@@ -316,8 +327,7 @@ class CLI:
         # "200 ×4, 500 ×1", in the order they came.
         lines += [f"  {r['key']} ×{r['requests']}: " + ", ".join(f"{'no answer' if code is None else code} ×{n}"
                                                              for code, n in result.codes[r["key"]].items()) for r in result.routes]
-        if result.skipped:
-            lines += ["Skipped:"] + [f"  {s['key']} ({s['reason']})" for s in result.skipped]
+        lines += header_names + self._skipped_lines(result.skipped)
         if result.unreachable:
             lines.append(f"Stopped early: {options['url']} isn't answering.")
         # Requests that reached no page aren't worth recording: the app likely
@@ -332,11 +342,24 @@ class CLI:
             return USAGE_ERROR
         if result.routes:
             ran_at = datetime.fromtimestamp(self.clock(), tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            skipped = [{key: value for key, value in s.items() if key != "missing"} for s in result.skipped]
             self.client().record_exercise((document.get("deployment") or {}).get("id"), routes=result.routes,
-                                          skipped=result.skipped, ran_at=ran_at)
+                                          skipped=skipped, ran_at=ran_at)
             lines.append("Recorded on the release. Wait for the verdict with: deployangel verify --wait")
         self._print("\n".join(lines))
         return USAGE_ERROR if result.unreachable else 0
+
+    @staticmethod
+    def _skipped_lines(skipped: list) -> list:
+        """Each skipped route and why, naming the parameters a --param would fill."""
+        if not skipped:
+            return []
+        lines = ["Skipped:"] + [f"  {s['key']} ({s['reason']}{': ' + ', '.join(s['missing']) if s.get('missing') else ''})"
+                                for s in skipped]
+        needing = next((s for s in skipped if s.get("missing")), None)
+        if needing:
+            lines.append(f"Fill path parameters with --param, such as --param {needing['missing'][0]}=42.")
+        return lines
 
     def exception(self) -> int:
         if not self.argv or self.argv[0].startswith("-"):

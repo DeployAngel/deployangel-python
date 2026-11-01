@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- `deployangel exercise --param pk=42` fills path parameters (`<int:pk>`,
+  `{pk}`, `:pk`), so routes with IDs in their paths can be exercised.
+  Skipped routes name the parameters they need.
+- `deployangel exercise --header="Name: value"`, or
+  `DEPLOYANGEL_EXERCISE_HEADERS` (one per line), sends headers with every
+  request, such as a Bearer token or a test account's session cookie. The
+  output names them but never shows their values, and they go only to the
+  `--url` host. Matches the Ruby gem.
+
 ## 0.1.22 (2026-11-01)
 
 - `deployangel exercise` prints each route's status codes (`404 ×1`)

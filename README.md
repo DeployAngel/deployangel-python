@@ -450,8 +450,8 @@ clearance, and what to exercise against production so it clears sooner.
 It separates what clearance waits on from changed and rarely used paths
 that are only worth running. Routes that change data are marked; use a test account for them, or ask
 first. `deployangel exercise --url=<production URL>` does the read-only part:
-it requests the plan's GET routes that have no path parameters, spreading any
-request shortfall across them (at most 200 requests, about 5 a second, as
+it requests the plan's GET routes whose path parameters it can fill, spreading
+any request shortfall across them (at most 200 requests, about 5 a second, as
 `DeployAngel-Exercise`), then records what it sent on the release, where the
 page lists it under "Exercised from your side". It skips and names routes
 that change data or need a path parameter, and stops requesting a page after
@@ -459,6 +459,19 @@ its first 404, sending its share to the pages that answered. It prints each
 route's status codes. If every page answers 404, 405, or 410, it records
 nothing and exits 5, since the URL is probably not the app's own host (a
 marketing site, say). `--dry-run` shows what it would send.
+
+`--param pk=42` fills a path parameter (`<int:pk>`, `{pk}`, `:pk`) in every
+route that has it, so `--param pk=42` reaches `GET /orders/<int:pk>/`. A
+value fills every route with that name, so a wrong one just gets a 404 and
+no more requests.
+
+`--header="Name: value"` sends a header with every request, such as
+`Authorization: Bearer …` for an API or a test account's session cookie for
+signed-in pages. Put secrets in `DEPLOYANGEL_EXERCISE_HEADERS` instead (one
+header per line), which keeps them out of shell history. Headers go only to
+the `--url` host, since redirects aren't followed. The output names them
+but never shows their values, and they're never sent to DeployAngel. Use a
+test account with as little access as possible: its cookie is a full sign-in.
 
 The command and its output match the Ruby gem's `deployangel` command, so the
 docs and agent instructions for either apply to both.

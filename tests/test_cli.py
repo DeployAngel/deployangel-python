@@ -646,15 +646,17 @@ def _exercise_document():
     return dict(verdict_document("observing"), exercise_plan=plan)
 
 
-def _exercise(io_streams, clock, *argv, client, answer=200):
+def _exercise(io_streams, clock, *argv, client, answer=200, env=None, sent_headers=None):
     stdout, stderr = io_streams
     sent = []
 
-    def requester(url):
+    def requester(url, headers):
         sent.append(url)
+        if sent_headers is not None:
+            sent_headers.append(headers)
         return answer
 
-    code = CLI(["exercise", *argv], env={}, stdout=stdout, stderr=stderr, client=client, sleeper=clock.advance, clock=clock,
+    code = CLI(["exercise", *argv], env=env or {}, stdout=stdout, stderr=stderr, client=client, sleeper=clock.advance, clock=clock,
                git_head="81ac27d0000", requester=requester).run()
     return code, sent
 
@@ -687,7 +689,7 @@ def test_exercise_stops_requesting_a_page_the_app_doesnt_serve(io_streams, clock
     client = FakeClient([_exercise_document()])
     sent = []
 
-    def requester(url):
+    def requester(url, headers):
         sent.append(url)
         return 404 if url.endswith("/about/") else 200
 
@@ -717,6 +719,44 @@ def test_exercise_records_pages_that_turned_the_request_away(io_streams, clock):
     out = io_streams[0].getvalue()
     assert "GET /products/ ×10: 401 ×10" in out and "No page answered" not in out
     assert any(call[0] == "exercise" for call in client.calls)
+
+
+def test_exercise_sends_headers_naming_them_but_never_showing_values(io_streams, clock):
+    client = FakeClient([_exercise_document()])
+    sent_headers = []
+    env = {"DEPLOYANGEL_EXERCISE_HEADERS": "Cookie: session_id=s3cret\n\nX-Test: 1\n"}
+    code, _ = _exercise(io_streams, clock, "--url=https://shop.example.com", "--header=Authorization: Bearer t0ken", client=client,
+                        env=env, sent_headers=sent_headers)
+    assert code == 0
+    assert all(h == {"Authorization": "Bearer t0ken", "Cookie": "session_id=s3cret", "X-Test": "1"} for h in sent_headers)
+    out = io_streams[0].getvalue()
+    assert "With headers: Authorization, Cookie, X-Test (values not shown)" in out
+    assert "t0ken" not in out and "s3cret" not in out
+    assert "t0ken" not in str(client.calls) and "s3cret" not in str(client.calls)
+
+
+def test_exercise_rejects_a_malformed_header_without_echoing_it(io_streams, clock):
+    code, sent = _exercise(io_streams, clock, "--url=https://shop.example.com", "--header=Authorization Bearer t0ken",
+                           client=FakeClient([_exercise_document()]))
+    assert code == 5 and sent == []
+    err = io_streams[1].getvalue()
+    assert 'header 1 must look like "Name: value"' in err and "t0ken" not in err
+
+
+def test_exercise_fills_path_parameters_and_names_whats_missing(io_streams, clock):
+    client = FakeClient([_exercise_document()])
+    code, sent = _exercise(io_streams, clock, "--url=https://shop.example.com", "--param=pk=7", client=client)
+    assert code == 0
+    assert "https://shop.example.com/orders/7/" in sent
+    _, _, attributes = next(call for call in client.calls if call[0] == "exercise")
+    assert "GET /orders/<int:pk>/" in [r["key"] for r in attributes["routes"]]
+    assert all("missing" not in s for s in attributes["skipped"])
+    out = io_streams[0].getvalue()
+    assert "GET /items/{item_id} (needs a path parameter: item_id)" in out
+    assert "Fill path parameters with --param, such as --param item_id=42." in out
+
+    code, _ = _exercise(io_streams, clock, "--url=https://shop.example.com", "--param=pk", client=client)
+    assert code == 5 and "--param must look like name=value" in io_streams[1].getvalue()
 
 
 def test_exercise_sends_nothing_on_a_dry_run_and_caps_requests(io_streams, clock):

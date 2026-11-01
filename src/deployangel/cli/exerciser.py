@@ -1,8 +1,9 @@
 """`deployangel exercise`: sends a release's exercise plan's read-only
 requests to production from the customer's side, then records what it sent,
 so the release page says which routes were exercised that way. Only GET
-routes with no path parameters and not marked as changing data; the rest
-are skipped and named, for the agent or a smoke test with a test account.
+routes not marked as changing data, and only those whose path parameters
+the caller filled (--param id=42); the rest are skipped and named, for the
+agent or a smoke test with a test account.
 The requests count like any traffic through the app's agent. Behaves like
 the Ruby gem's Exerciser."""
 
@@ -25,8 +26,39 @@ MAX_CONSECUTIVE_ERRORS = 5
 # A route table can list pages an app doesn't serve, like the edit page of a
 # resource that has none. One answer like this is enough to know.
 NOT_SERVED = (404, 405, 410)
-# Rails' :id and *path, Django's <int:pk>, FastAPI's {id}.
-PARAMETER = re.compile(r"/[:*{<]")
+# A path parameter, capturing its name: Rails' :id and *path, FastAPI's and
+# ASP.NET Core's {id}, {id:int}, and {*path}, Django's <int:pk>.
+PARAMETER = re.compile(r"[:*]([A-Za-z_]\w*)|\{\*{0,2}([A-Za-z_]\w*)(?::[^}]*)?\??\}|<(?:\w+:)?([A-Za-z_]\w*)>", re.ASCII)
+# One that can span segments, so its value keeps its slashes.
+GLOB = re.compile(r"\A(?:\*|\{\*|\{\w+:path\}|<path:)", re.ASCII)
+# "Name: value", as with curl -H: a header name, then a value on one line.
+HEADER = re.compile(r"\A([!#$%&'*+.^_`|~0-9A-Za-z-]+):[ \t]*(\S[^\r\n]*)\Z")
+PARAM = re.compile(r"\A([A-Za-z_]\w*)=(.+)\Z", re.ASCII | re.DOTALL)
+
+
+def parse_headers(lines) -> dict:
+    """Headers to send with every request, such as a token or a test
+    account's session cookie, from "Name: value" lines. Raises ValueError
+    naming the line, never its value."""
+    headers = {}
+    for i, line in enumerate(line.strip() for line in lines if line.strip()):
+        match = HEADER.match(line)
+        if not match:
+            raise ValueError(f'header {i + 1} must look like "Name: value"')
+        headers[match[1]] = match[2].rstrip()
+    return headers
+
+
+def parse_params(pairs) -> dict:
+    """Path parameter values, from "name=value" (--param id=42). Each fills
+    that name in every route that has it."""
+    params = {}
+    for pair in pairs:
+        match = PARAM.match(pair)
+        if not match:
+            raise ValueError(f"--param must look like name=value, such as --param id=42 (got {pair!r})")
+        params[match[1]] = match[2]
+    return params
 
 
 @dataclass
@@ -62,11 +94,13 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
-def _get(url: str) -> Optional[int]:
+def _get(url: str, headers: dict) -> Optional[int]:
     """The status code, or None when there was no answer."""
     request = urllib.request.Request(url, method="GET")
     request.add_header("User-Agent", f"DeployAngel-Exercise/{VERSION} (+https://www.deployangel.com/docs#exercise)")
     request.add_header("Accept", "text/html,application/json;q=0.9,*/*;q=0.8")
+    for name, value in headers.items():
+        request.add_header(name, value)
     try:
         with urllib.request.build_opener(_NoRedirect).open(request, timeout=TIMEOUT) as response:
             return response.status
@@ -78,10 +112,14 @@ def _get(url: str) -> Optional[int]:
 
 class Exerciser:
     def __init__(self, base_url: str, max_requests: int = MAX_REQUESTS, sleeper: Callable[[float], None] = None,
-                 requester: Optional[Callable[[str], Optional[int]]] = None):
+                 requester: Optional[Callable[[str, dict], Optional[int]]] = None, headers: Optional[dict] = None,
+                 params: Optional[dict] = None):
+        """headers go only to base_url's host: redirects aren't followed."""
         import time
 
         self.base = urllib.parse.urlsplit(base_url)
+        self.headers = headers or {}
+        self.params = params or {}
         self.max_requests = max_requests
         self.sleeper = sleeper or time.sleep
         self.requester = requester or _get
@@ -93,13 +131,12 @@ class Exerciser:
             if item.get("kind") != "route":
                 continue
             method, _, path = str(item.get("key", "")).partition(" ")
-            reason = None
             if item.get("mutating") or method != "GET":
-                reason = "changes data"
-            elif not path or PARAMETER.search(path):
-                reason = "needs a path parameter"
-            if reason:
-                skipped.append({"key": item.get("key"), "reason": reason})
+                skipped.append({"key": item.get("key"), "reason": "changes data"})
+                continue
+            path, missing = self.fill(path) if path else (None, [])
+            if path is None or missing:
+                skipped.append({"key": item.get("key"), "reason": "needs a path parameter", "missing": missing})
                 continue
             needed = int(item["runs_needed"]) - int(item.get("runs") or 0) if item.get("runs_needed") else 1
             targets.append(Target(item["key"], path, max(needed, 1)))
@@ -138,7 +175,7 @@ class Exerciser:
     def _send(self, target: Target) -> Optional[int]:
         if self._sent:
             self.sleeper(INTERVAL)
-        status = self.requester(self.url_for(target.path))
+        status = self.requester(self.url_for(target.path), self.headers)
         self._sent += 1
         kind = f"{status // 100}xx" if status else "error"
         statuses = self._statuses.setdefault(target.key, {})
@@ -150,6 +187,23 @@ class Exerciser:
 
     def _unreachable(self) -> bool:
         return self._errors_in_a_row >= MAX_CONSECUTIVE_ERRORS
+
+    def fill(self, path: str):
+        """The path with the given parameters filled in, and the names of any
+        left unfilled."""
+        missing = []
+
+        def replace(match):
+            name = match[1] or match[2] or match[3]
+            value = self.params.get(name)
+            if value is None:
+                if name not in missing:
+                    missing.append(name)
+                return match[0]
+            parts = value.split("/") if GLOB.match(match[0]) else [value]
+            return "/".join(urllib.parse.quote(part, safe="") for part in parts)
+
+        return PARAMETER.sub(replace, path), missing
 
     def url_for(self, path: str) -> str:
         return urllib.parse.urlunsplit((self.base.scheme, self.base.netloc, self.base.path.rstrip("/") + path, "", ""))
