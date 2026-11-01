@@ -677,7 +677,7 @@ def test_exercise_sends_the_plans_read_only_requests_spreads_the_shortfall_and_r
         {"key": "GET /items/{item_id}", "reason": "needs a path parameter"},
     ]
     out = io_streams[0].getvalue()
-    for text in ("Sent 18 requests to https://shop.example.com/", "GET /products/ ×10: 10 2xx",
+    for text in ("Sent 18 requests to https://shop.example.com/", "GET /products/ ×10: 200 ×10",
                  "POST /password_resets/ (changes data)", "Recorded on the release."):
         assert text in out
 
@@ -697,6 +697,26 @@ def test_exercise_stops_requesting_a_page_the_app_doesnt_serve(io_streams, clock
     routes = next(call for call in client.calls if call[0] == "exercise")[2]["routes"]
     assert routes == [{"key": "GET /products/", "requests": 17, "statuses": {"2xx": 17}},
                       {"key": "GET /about/", "requests": 1, "statuses": {"4xx": 1}}]
+
+
+def test_exercise_says_when_no_page_answered_and_records_nothing(io_streams, clock):
+    client = FakeClient([_exercise_document()])
+    code, sent = _exercise(io_streams, clock, "--url=https://www.shop.example.com", client=client, answer=404)
+    assert code == 5 and len(sent) == 2
+    out = io_streams[0].getvalue()
+    for text in ("GET /products/ ×1: 404", "No page answered at https://www.shop.example.com", "Is that the app's own host",
+                 "16 more requests weren't sent", "Nothing was recorded on the release."):
+        assert text in out
+    assert not any(call[0] == "exercise" for call in client.calls)
+
+
+def test_exercise_records_pages_that_turned_the_request_away(io_streams, clock):
+    client = FakeClient([_exercise_document()])
+    code, _ = _exercise(io_streams, clock, "--url=https://shop.example.com", client=client, answer=401)
+    assert code == 0
+    out = io_streams[0].getvalue()
+    assert "GET /products/ ×10: 401 ×10" in out and "No page answered" not in out
+    assert any(call[0] == "exercise" for call in client.calls)
 
 
 def test_exercise_sends_nothing_on_a_dry_run_and_caps_requests(io_streams, clock):

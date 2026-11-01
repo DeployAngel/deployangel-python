@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- `deployangel exercise` prints each route's status codes (`404 ×1`)
+  instead of their class (`1 4xx`). When every page answers 404, 405, or
+  410, as when `--url` is the app's marketing site rather than its own
+  host, it says so, records nothing on the release, and exits 5. Matches
+  the Ruby gem.
+
 ## 0.1.21 (2026-11-01)
 
 - `deployangel verify` prints a failed release's next steps: the last

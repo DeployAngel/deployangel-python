@@ -313,11 +313,23 @@ class CLI:
 
         result = exerciser.run(plan)
         lines = [f"Sent {result.sent} requests to {options['url']}:"]
-        lines += [f"  {r['key']} ×{r['requests']}: " + ", ".join(f"{n} {kind}" for kind, n in r["statuses"].items()) for r in result.routes]
+        # "200 ×4, 500 ×1", in the order they came.
+        lines += [f"  {r['key']} ×{r['requests']}: " + ", ".join(f"{'no answer' if code is None else code} ×{n}"
+                                                             for code, n in result.codes[r["key"]].items()) for r in result.routes]
         if result.skipped:
             lines += ["Skipped:"] + [f"  {s['key']} ({s['reason']})" for s in result.skipped]
         if result.unreachable:
             lines.append(f"Stopped early: {options['url']} isn't answering.")
+        # Requests that reached no page aren't worth recording: the app likely
+        # never saw them.
+        if result.routes and result.nothing_served() and not result.unreachable:
+            lines += ["", f"No page answered at {options['url']}: every route said it doesn't exist. Is that the app's own host, "
+                          "and not a marketing site or a different domain? Pass the URL where the app's pages load."]
+            if result.unsent:
+                lines.append(f"{result.unsent} more requests weren't sent, since no route answered.")
+            lines.append("Nothing was recorded on the release.")
+            self._print("\n".join(lines))
+            return USAGE_ERROR
         if result.routes:
             ran_at = datetime.fromtimestamp(self.clock(), tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
             self.client().record_exercise((document.get("deployment") or {}).get("id"), routes=result.routes,

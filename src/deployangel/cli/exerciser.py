@@ -42,6 +42,17 @@ class Result:
     skipped: list = field(default_factory=list)
     sent: int = 0
     unreachable: bool = False
+    # Each route's exact status codes, None for no answer, for display;
+    # routes carries status classes, which is what's recorded.
+    codes: dict = field(default_factory=dict)
+    # Requests the plan wanted that went nowhere, since no route answered.
+    unsent: int = 0
+
+    def nothing_served(self) -> bool:
+        """Every answer said the page isn't served. Usually the wrong host,
+        like the app's marketing site."""
+        answers = [code for codes in self.codes.values() for code in codes]
+        return bool(answers) and all(code in NOT_SERVED for code in answers)
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -101,7 +112,7 @@ class Exerciser:
         """A route whose first request says it isn't served gets no more; its
         share goes to the routes that answered."""
         targets, skipped = self.plan(exercise_plan)
-        self._statuses, self._sent, self._errors_in_a_row = {}, 0, 0
+        self._statuses, self._codes, self._sent, self._errors_in_a_row = {}, {}, 0, 0
         leftover, answered = 0, []
         for target in targets:
             for i in range(target.count):
@@ -118,9 +129,11 @@ class Exerciser:
                 if self._unreachable():
                     break
                 self._send(answered[i % len(answered)])
+        unsent = 0 if answered else leftover
         routes = [{"key": target.key, "requests": sum(self._statuses[target.key].values()), "statuses": self._statuses[target.key]}
                   for target in targets if target.key in self._statuses]
-        return Result(routes=routes, skipped=skipped, sent=self._sent, unreachable=self._unreachable())
+        return Result(routes=routes, skipped=skipped, sent=self._sent, unreachable=self._unreachable(),
+                      codes={route["key"]: self._codes[route["key"]] for route in routes}, unsent=unsent)
 
     def _send(self, target: Target) -> Optional[int]:
         if self._sent:
@@ -130,6 +143,8 @@ class Exerciser:
         kind = f"{status // 100}xx" if status else "error"
         statuses = self._statuses.setdefault(target.key, {})
         statuses[kind] = statuses.get(kind, 0) + 1
+        codes = self._codes.setdefault(target.key, {})
+        codes[status] = codes.get(status, 0) + 1
         self._errors_in_a_row = self._errors_in_a_row + 1 if kind == "error" else 0
         return status
 
