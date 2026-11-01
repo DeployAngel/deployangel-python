@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.21 (2026-11-01)
 
 - `deployangel verify` prints a failed release's next steps: the last
   cleared release a rollback would go to, with the migrations it would
