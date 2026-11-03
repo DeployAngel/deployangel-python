@@ -115,4 +115,4 @@ def _record_exception(job, name: str) -> None:
     class_name, frames, message = parsed
     messages = agent.config.exception_messages
     details = fingerprint.details(class_name, frames, agent.root, message=message if messages else None)
-    agent.record_exception_details(details, fingerprint.app_backtrace(frames, agent.root), source=f"job_class:{name}")
+    agent.record_exception_details(details, fingerprint.representative_backtrace(frames, agent.root), source=f"job_class:{name}")

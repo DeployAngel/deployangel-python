@@ -101,7 +101,17 @@ def test_messages_replace_redactions_as_whole_words_first():
 
 
 def test_backtraces_keep_only_application_frames():
-    assert fingerprint.app_backtrace(FRAMES, ROOT) == ["shop/services/orders.py#create_order", "shop/views.py#checkout"]
+    assert fingerprint.representative_backtrace(FRAMES, ROOT) == ["shop/services/orders.py#create_order", "shop/views.py#checkout"]
+
+
+def test_backtraces_keep_the_first_library_frames_when_there_is_no_application_frame():
+    frames = [
+        ("/usr/lib/python3.12/socket.py", "readinto"),
+        ("/usr/lib/python3.12/smtplib.py", "getreply"),
+        ("/app/.heroku/python/lib/python3.12/site-packages/django/core/mail/backends/smtp.py", "open"),
+    ]
+    assert fingerprint.representative_backtrace(frames, ROOT) == \
+        ["socket.py#readinto", "smtplib.py#getreply", "django/core/mail/backends/smtp.py#open"]
 
 
 def test_a_formatted_traceback_fingerprints_like_the_exception():

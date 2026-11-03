@@ -80,12 +80,16 @@ def top_frame(frames: list, root: Optional[str]) -> tuple:
 
 
 def backtrace(exception: BaseException, root: Optional[str]) -> list:
-    return app_backtrace(locations(exception), root)
+    return representative_backtrace(locations(exception), root)
 
 
-def app_backtrace(frames: list, root: Optional[str]) -> list:
-    """Application frames only, relative to the root."""
-    return [f"{normalize_path(path, root)}#{name}" for path, name in frames if is_app_path(path, root)][:MAX_BACKTRACE]
+def representative_backtrace(frames: list, root: Optional[str]) -> list:
+    """Application frames only, relative to the root. An exception raised
+    entirely in packages (a task's SMTP timeout) has none, so it gets its first
+    frames instead, normalized as in top_frame: they're the only way to tell
+    which package's path failed."""
+    app = [(path, name) for path, name in frames if is_app_path(path, root)]
+    return [f"{normalize_path(path, root)}#{name}" for path, name in (app or frames)[:MAX_BACKTRACE]]
 
 
 def normalize_message(message, redactions: Iterable = ()) -> str:

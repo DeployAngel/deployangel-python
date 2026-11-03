@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- An exception raised entirely in packages, with no frame from the app's
+  code, now sends its first library frames as its stack trace
+  (`django/core/mail/backends/smtp.py#open`), normalized like the top
+  frame, with no absolute paths or versions. Before, it sent none, so an
+  error such as an email task's SMTP timeout showed no trace. Matches the
+  Ruby gem.
+
 ## 0.1.23 (2026-11-01)
 
 - `deployangel exercise --param pk=42` fills path parameters (`<int:pk>`,

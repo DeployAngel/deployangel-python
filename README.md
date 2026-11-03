@@ -142,7 +142,8 @@ doesn't invalidate cached layers, and you build with
   each has been running, so a task that hangs is noticed.
 - Release identity, runtime versions, and a per-process instance ID.
 - Exceptions: a stable fingerprint, the exception class, the first line of the
-  message, and application frames only (file paths and function names). In
+  message, and application frames only (file paths and function names), or
+  the first library frames (package paths) when none is the app's. In
   the message, numbers, IDs, emails, UUIDs, long hex strings, quoted values,
   and the request's host are replaced with placeholders. Other words are kept:
   `Payment failed for Jane Doe` is sent as it is. If your app's messages might
@@ -236,7 +237,7 @@ DEPLOYANGEL = {"ignored_routes": ["GET /status/"]}
 ### Exception messages
 
 To send exceptions without any message, only their class, fingerprint, and
-application frames:
+stack frames:
 
 ```python
 DEPLOYANGEL = {"exception_messages": False}   # or DEPLOYANGEL_EXCEPTION_MESSAGES=false
