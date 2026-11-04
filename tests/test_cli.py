@@ -7,7 +7,7 @@ import os
 
 import pytest
 
-from deployangel.cli import CLI, ci
+from deployangel.cli import AGENTS_END, AGENTS_START, CLI, agent_instructions, ci, project_command
 from deployangel.cli.client import ApiError, NotFound, Unauthorized
 from deployangel.cli.mcp import Server
 
@@ -121,6 +121,17 @@ def run(io_streams, clock):
 
     run.stdout, run.stderr = stdout, stderr
     return run
+
+
+def test_says_at_the_start_of_a_session_when_the_projects_agent_instructions_are_out_of_date(io_streams, clock, tmp_path):
+    stdout, stderr = io_streams
+    (tmp_path / "AGENTS.md").write_text(f"{AGENTS_START}\nOld text.\n{AGENTS_END}\n")
+    client = FakeClient([verdict_document("closed", "verified")])
+    CLI(["status", "--format=text"], env={}, stdout=stdout, stderr=stderr, client=client, sleeper=clock.advance,
+        clock=clock, git_head="81ac27d0000", root=str(tmp_path)).run()
+
+    assert ("AGENTS.md has an older copy of DeployAngel's agent instructions; "
+            "run `deployangel install agents` to update") in stderr.getvalue()
 
 
 def test_maps_verdicts_to_exit_codes(run):
@@ -979,6 +990,21 @@ class TestDoctor:
         self.write(".git/HEAD", "81ac27d0f00dbadc0ffee81ac27d0f00dbadc0ff\n")
         self.doctor(client=client, env={"DEPLOYANGEL_TOKEN": "da_live_agent"})
         assert "Here, the agent" not in self.output()
+
+    def test_warns_when_the_project_has_an_older_copy_of_deployangels_agent_instructions_and_not_for_the_current_one(self):
+        current = agent_instructions(" ".join(project_command(str(self.root))))
+        self.write("AGENTS.md", f"# Project\n\n{current}")
+        self.doctor()
+        assert "older copy" not in self.output()
+
+        self.write("AGENTS.md", f"# Project\n\n{AGENTS_START}\n## Production verification (DeployAngel)\nOld text.\n{AGENTS_END}\n")
+        self.write("CLAUDE.md", "Hand-written notes about DeployAngel, with no markers.\n")
+        self.clear()
+        self.doctor()
+
+        assert "! AGENTS.md has an older copy of DeployAngel's agent instructions" in self.output()
+        assert "Run deployangel install agents to update it." in self.output()
+        assert "CLAUDE.md has" not in self.output()
 
     def test_writes_the_checks_and_the_servers_document_as_json(self):
         CLI(["doctor", "--format=json"], env={}, stdout=self.stdout, stderr=self.stderr, client=self.client(setup_document()),

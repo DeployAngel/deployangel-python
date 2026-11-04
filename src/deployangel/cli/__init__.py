@@ -79,6 +79,16 @@ AGENTS_START = "<!-- deployangel:start -->"
 AGENTS_END = "<!-- deployangel:end -->"
 
 
+def project_command(root: str) -> list:
+    """How an agent runs this project's deployangel: through uv or Poetry
+    when the project uses one, since it's installed in their environment."""
+    if os.path.exists(os.path.join(root, "uv.lock")):
+        return ["uv", "run", "deployangel"]
+    if os.path.exists(os.path.join(root, "poetry.lock")):
+        return ["poetry", "run", "deployangel"]
+    return ["deployangel"]
+
+
 def agent_instructions(command: str) -> str:
     return f"""{AGENTS_START}
 ## Production verification (DeployAngel)
@@ -258,7 +268,18 @@ class CLI:
         self._step_summary(formatter.markdown(document))
         if outcome.timed_out:
             self._error("timed out; verification is still in progress")
+        if status:
+            self._stale_instructions_note()
         return outcome.exit_code
+
+    def _stale_instructions_note(self) -> None:
+        """At the start of a session (`status`), where an agent reads it and
+        can update the instructions it's following."""
+        from deployangel.cli.doctor import stale_instructions, stale_instructions_note
+
+        stale = stale_instructions(self.root)
+        if stale:
+            self._error(f"{stale_instructions_note(stale)}; run `deployangel install agents` to update")
 
     def plan(self) -> int:
         """The release's exercise plan: what stands between it and clearance,
@@ -425,13 +446,7 @@ class CLI:
         return 0
 
     def _project_command(self) -> list:
-        """How an agent runs this project's deployangel: through uv or Poetry
-        when the project uses one, since it's installed in their environment."""
-        if os.path.exists(os.path.join(self.root, "uv.lock")):
-            return ["uv", "run", "deployangel"]
-        if os.path.exists(os.path.join(self.root, "poetry.lock")):
-            return ["poetry", "run", "deployangel"]
-        return ["deployangel"]
+        return project_command(self.root)
 
     def _install_json_mcp(self, relative: str, command: list, agent: str) -> str:
         path = os.path.join(self.root, relative)

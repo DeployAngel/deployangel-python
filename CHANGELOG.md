@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- `deployangel doctor` warns when the project's AGENTS.md or CLAUDE.md has
+  an older copy of the block `deployangel install agents` writes, and
+  `deployangel status` says so on stderr at the start of a session, where
+  a coding agent reads it. Running `deployangel install agents` updates
+  it. Hand-written instructions without the block's markers aren't
+  checked. Matches the Ruby gem.
+
 ## 0.1.25 (2026-11-04)
 
 - `deployangel verify` shows a volume drop (servers from 2026-11-04) as

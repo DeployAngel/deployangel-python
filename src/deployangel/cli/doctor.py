@@ -34,6 +34,34 @@ SCHEDULERS = (("celery", "Celery Beat's beat_schedule"), ("django-celery-beat", 
               ("django-crontab", "django-crontab's CRONJOBS"))
 
 
+def stale_instructions(root: str) -> list:
+    """Files whose DeployAngel block (between the markers `deployangel install
+    agents` writes) differs from this version's: agents keep following the
+    older copy until it's updated. Hand-written instructions without the
+    markers aren't checked."""
+    from deployangel.cli import AGENTS_END, AGENTS_START, agent_instructions, project_command
+
+    block = re.compile(re.escape(AGENTS_START) + r".*?" + re.escape(AGENTS_END), re.DOTALL)
+    current = agent_instructions(" ".join(project_command(root))).rstrip("\n")
+    stale = []
+    try:
+        for name in ("AGENTS.md", "CLAUDE.md"):
+            path = os.path.join(root, name)
+            if not os.path.isfile(path):
+                continue
+            with open(path, encoding="utf-8") as file:
+                found = block.search(file.read())
+            if found and found.group(0) != current:
+                stale.append(name)
+    except (OSError, ValueError):
+        return []
+    return stale
+
+
+def stale_instructions_note(files: list) -> str:
+    return f"{' and '.join(files)} {'has' if len(files) == 1 else 'have'} an older copy of DeployAngel's agent instructions"
+
+
 @dataclass
 class Check:
     # ok, warn, error, or info. Only errors fail the command.
@@ -60,7 +88,8 @@ class Doctor:
     def checks(self) -> list:
         if self._checks is None:
             self.setup, server = self._server_checks()
-            checks = [*self._agent_checks(), self._here_check(), self._schedule_check(), *server, self._release_check()]
+            checks = [*self._agent_checks(), self._here_check(), self._schedule_check(), *server, self._release_check(),
+                      self._instructions_check()]
             self._checks = [check for check in checks if check is not None]
         return self._checks
 
@@ -94,6 +123,13 @@ class Doctor:
             name = "requirements.txt" if "requirements.txt" in requirements else requirements[0]
             return f"Add deployangel to {name} and run pip install -r {name}."
         return 'Add "deployangel" to the dependencies in pyproject.toml, then install it.'
+
+    def _instructions_check(self) -> Optional[Check]:
+        stale = stale_instructions(self.root)
+        if not stale:
+            return None
+        return Check("warn", stale_instructions_note(stale),
+                     f"Run deployangel install agents to update {'it' if len(stale) == 1 else 'them'}.")
 
     def _schedule_check(self) -> Check:
         files = self._dependencies()
