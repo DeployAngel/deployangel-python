@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.25 (2026-11-04)
 
 - `deployangel verify` shows a volume drop (servers from 2026-11-04) as
   what ran against what was expected (`0 requests, about 27 expected`),
