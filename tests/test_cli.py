@@ -223,6 +223,23 @@ def test_renders_a_readable_summary(run):
     assert "8640000" not in out
 
 
+def test_shows_a_volume_drop_against_what_was_expected_who_accepted_a_change_as_intended_and_where_a_person_can(run):
+    document = verdict_document("closed", "failed")
+    document["findings"] = [
+        {"signal": "volume_drop", "scope": "route:POST /scans/callback", "status": "failing", "baseline_value": 27.4,
+         "observed_value": 0.0, "accept_url": "https://app.deployangel.com/apps/1/deployments/2#findings"},
+        {"signal": "checkpoint_rate", "scope": "checkpoint:upload.scanned", "status": "accepted", "baseline_value": 41.0,
+         "observed_value": 0.0, "accepted_as_intended": {"by": "Pat", "note": "Retired the scanner"}},
+    ]
+    run("verify", "--format=text", client=FakeClient([document]))
+
+    out = run.stdout.getvalue()
+    for text in ("failing  Volume on route:POST /scans/callback: 0 requests, about 27 expected",
+                 "If this change was intended, a person can accept it: https://app.deployangel.com/apps/1/deployments/2#findings",
+                 "accepted Checkpoint on checkpoint:upload.scanned: 0 occurrences", "Accepted as intended by Pat: Retired the scanner"):
+        assert text in out
+
+
 def test_adds_the_verdict_to_the_github_actions_job_summary(run, tmp_path):
     document = verdict_document("closed", "failed")
     document["findings"] = [
@@ -557,6 +574,7 @@ class TestMcp:
         assert "inconclusive means NOT verified" in result["instructions"]
         assert "medium clears a release just as high does" in result["instructions"]
         assert "watching_closely" in result["instructions"]
+        assert "You cannot accept it" in result["instructions"] and "accept_url" in result["instructions"]
         assert "get_exercise_plan" in result["instructions"] and "warm_up" in result["instructions"]
         assert self.request(server, "initialize", {"protocolVersion": "1999-01-01"})["result"]["protocolVersion"] == "2025-06-18"
 

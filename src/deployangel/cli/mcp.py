@@ -35,6 +35,11 @@ clears sooner. Items with needed true are what clearance waits on; the rest are 
 Only act on status "exercisable" or "waiting_for_activity"; for "warm_up" or
 "no_baseline" nothing you run can clear it. Exercise routes marked mutating only with a test account
 or after asking. Report what you ran with the plan's report_with command (deployangel check).
+A failing volume_drop or checkpoint_rate finding with an accept_url may be an intended change, such as
+a route or job you removed on purpose. You cannot accept it, and must not try: tell the user why you
+think it was intended, with your evidence, and give them the accept_url so a person decides. Until
+someone accepts it, the release is failed: never report it as success. A finding with status
+accepted was accepted as intended by the person in accepted_as_intended.
 """
 
 TARGET_PROPERTIES = {

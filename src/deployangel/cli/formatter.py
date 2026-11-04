@@ -12,10 +12,13 @@ LABELS = {
     "job_failure_rate": "Job failure rate", "job_duration": "Job duration p95", "queue_latency": "Queue latency p95",
     "new_fingerprint": "New exception", "fingerprint_amplification": "Exception amplification",
     "missing_recurring_job": "Recurring job", "first_use_failure": "First-use failure", "external_check": "External check",
-    "checkpoint_rate": "Checkpoint",
+    "checkpoint_rate": "Checkpoint", "volume_drop": "Volume",
 }
 DURATIONS = ("p95_latency", "job_duration", "queue_latency")
 COUNTS = ("new_fingerprint", "checkpoint_rate")
+# Findings worth listing: problems, and changes a person accepted as
+# intended (servers from 2026-11-04 send "accepted").
+LISTED = ("failing", "warning", "accepted")
 # Exercise plan statuses with something worth running now.
 EXERCISABLE = ("exercisable", "waiting_for_activity")
 REASONS = {"normally_active": "normally active", "changed_in_release": "changed in this release",
@@ -28,7 +31,9 @@ def verification(document: dict) -> str:
     found = problems(document)
     if found:
         lines.append("Findings:")
-        lines.extend(f"  {f['status'].ljust(8)} {finding_line(f)}" for f in found)
+        for f in found:
+            lines.append(f"  {f['status'].ljust(8)} {finding_line(f)}")
+            lines.extend(f"           {line}" for line in acceptance_lines(f))
     gathering = gathering_line(document)
     if gathering:
         lines.append(f"{gathering} (--format=json for details)")
@@ -47,7 +52,7 @@ def markdown(document: dict) -> str:
     found = problems(document)
     if found:
         lines += ["", "| Status | Finding |", "| --- | --- |"]
-        lines.extend(f"| {f['status']} | {_cell(finding_line(f))} |" for f in found)
+        lines.extend(f"| {f['status']} | {_cell('. '.join([finding_line(f), *acceptance_lines(f)]))} |" for f in found)
     gathering = gathering_line(document)
     if gathering:
         lines += ["", gathering]
@@ -93,7 +98,18 @@ def notes(document: dict) -> list:
 
 
 def problems(document: dict) -> list:
-    return [f for f in document.get("findings") or [] if f.get("status") in ("failing", "warning")]
+    return [f for f in document.get("findings") or [] if f.get("status") in LISTED]
+
+
+def acceptance_lines(finding: dict) -> list:
+    """Who accepted a finding as an intended change, or where a person can.
+    Only a person can, on the release page: the API can't."""
+    accepted = finding.get("accepted_as_intended")
+    if accepted:
+        return [f"Accepted as intended by {accepted.get('by')}: {accepted.get('note')}"]
+    if finding.get("accept_url"):
+        return [f"If this change was intended, a person can accept it: {finding['accept_url']}"]
+    return []
 
 
 def gathering_line(document: dict) -> Optional[str]:
@@ -244,6 +260,12 @@ def exception(details: dict) -> str:
 def finding_line(finding: dict) -> str:
     signal = finding.get("signal")
     label = f"{LABELS.get(signal, signal)} on {finding.get('scope')}"
+    if signal == "volume_drop":
+        # Its baseline value is what the release before predicts for this
+        # much traffic.
+        unit = "requests" if str(finding.get("scope") or "").startswith("route:") else "runs"
+        return (f"{label}: {int(finding.get('observed_value') or 0)} {unit}, "
+                f"about {_round(float(finding.get('baseline_value') or 0))} expected")
     if signal in COUNTS:
         return f"{label}: {int(finding.get('observed_value') or 0)} occurrences"
     if signal == "missing_recurring_job":

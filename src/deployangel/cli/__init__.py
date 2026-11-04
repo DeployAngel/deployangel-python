@@ -101,6 +101,10 @@ verdict: call the `wait_for_verification` MCP tool with the commit and
   investigate the likely cause, and propose a fix. `next_steps` names the last
   cleared release a rollback would go to. Do not roll back or change
   production without explicit approval.
+- A failed release whose failing finding is a volume or checkpoint drop you
+  made on purpose (a route or job you removed): you can't accept it. Tell the
+  user why you think it was intended, with your evidence, and give them the
+  finding's `accept_url` so a person decides. It stays failed until then.
 - Exit 3: still verifying; run the command again.
 - Not cleared yet: call `get_exercise_plan` (or `{command} plan`).
   If its status is "exercisable" or "waiting_for_activity", run
