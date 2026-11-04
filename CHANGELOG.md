@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.26 (2026-11-04)
 
 - `deployangel doctor` warns when the project's AGENTS.md or CLAUDE.md has
   an older copy of the block `deployangel install agents` writes, and
