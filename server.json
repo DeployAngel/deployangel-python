@@ -8,12 +8,12 @@
     "url": "https://github.com/DeployAngel/deployangel-python",
     "source": "github"
   },
-  "version": "0.1.26",
+  "version": "0.1.27",
   "packages": [
     {
       "registryType": "pypi",
       "identifier": "deployangel",
-      "version": "0.1.26",
+      "version": "0.1.27",
       "runtimeHint": "uvx",
       "transport": {
         "type": "stdio"
