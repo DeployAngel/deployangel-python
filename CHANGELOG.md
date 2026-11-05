@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.28 (2026-11-05)
 
 - `deployangel verify` marks a late regression that someone dismissed as a
   false alarm, with who and why (servers from 2026-11-05), and the MCP
