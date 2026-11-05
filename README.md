@@ -184,8 +184,8 @@ user data.
 
 `python bench/overhead.py` measures this. On an Apple M-series laptop with
 Python 3.14, recording a request adds about 1.7 µs, and with every route, job,
-checkpoint, and exception list at its cap the agent holds about 0.5 MB,
-including 10 unsent minutes.
+checkpoint, and exception list at its cap the agent holds under 1 MB (0.73 MB
+at peak), including an hour (60) of unsent minutes.
 
 ## Configuration
 
