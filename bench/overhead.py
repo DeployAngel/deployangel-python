@@ -44,7 +44,8 @@ for i in range(10_000):
 print(f"fingerprinting an exception: {(time.perf_counter() - started) / 10_000 * 1e6:.1f} µs")
 
 tracemalloc.start()
-for minute in range(10):
+unsent = agent.config.max_queued_payloads
+for minute in range(unsent):
     agent._clock = agent._aggregator._clock = (lambda m=minute: 1790776800 + m * 60)
     for r in range(150):
         http.record("GET", f"/r{r}/", 500, time.perf_counter())
@@ -59,4 +60,4 @@ for minute in range(10):
             deployangel.record_exception(error)
     agent.flush(include_current=True)
 current, peak = tracemalloc.get_traced_memory()
-print(f"memory with every list at its cap and 10 unsent minutes: {current / 1e6:.2f} MB (peak {peak / 1e6:.2f} MB)")
+print(f"memory with every list at its cap and {unsent} unsent minutes: {current / 1e6:.2f} MB (peak {peak / 1e6:.2f} MB)")

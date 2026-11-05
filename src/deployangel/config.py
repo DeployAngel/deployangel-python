@@ -35,7 +35,10 @@ class Configuration:
         self.root = env.get("DEPLOYANGEL_ROOT") or None
         self.flush_interval = 60
         self.timeout = 5.0
-        self.max_queued_payloads = 10
+        # An hour of minutes, gzipped, so an hour when DeployAngel can't be
+        # reached loses nothing. A lost minute leaves a gap the cloud learns
+        # the app's normal traffic around.
+        self.max_queued_payloads = 60
         self.max_routes = 100
         self.logger = logging.getLogger("deployangel")
         self.file_digests = parse_boolean(env.get("DEPLOYANGEL_FILE_DIGESTS")) is not False
