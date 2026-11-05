@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- `deployangel verify` marks a late regression that someone dismissed as a
+  false alarm, with who and why (servers from 2026-11-05), and the MCP
+  server's `list_late_regressions` says that one with `dismissed` set needs
+  no action. Only a person can dismiss one, on the release page. Matches the Ruby gem.
+
 ## 0.1.27 (2026-11-05)
 
 - The agent keeps an hour of unsent minutes (60 payloads, up from 10) when

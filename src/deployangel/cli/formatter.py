@@ -141,7 +141,7 @@ def sections(document: dict) -> list:
         ("Critical flows", flows),
         ("Changed but not yet exercised", [item.get("key") for item in changed]),
         ("To clear sooner, exercise (deployangel plan for details)", exercisable_items(document)[:5]),
-        ("Late regressions", [late.get("summary") for late in document.get("late_regressions") or []]),
+        ("Late regressions", [late_regression_line(late) for late in document.get("late_regressions") or []]),
         # A failed release's rollback target and where to look first
         # (servers from 2026-11-01 send them).
         ("Next steps", [step.get("text") for step in document.get("next_steps") or []]),
@@ -297,3 +297,11 @@ def _round(value: float, digits: int = 0):
     same numbers. Whole numbers print without a decimal point."""
     rounded = Decimal(str(value)).quantize(Decimal(1).scaleb(-digits), rounding=ROUND_HALF_UP)
     return int(rounded) if digits == 0 else float(rounded)
+
+
+def late_regression_line(late):
+    """Servers from 2026-11-05 say when a person dismissed one as a false alarm."""
+    dismissed = late.get("dismissed")
+    if not dismissed:
+        return late.get("summary")
+    return f"{late.get('summary')} (dismissed as a false alarm by {dismissed.get('by')}: {dismissed.get('note')})"

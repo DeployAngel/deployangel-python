@@ -209,6 +209,20 @@ def test_waits_for_the_deployment_to_be_registered_or_exits_4(run, io_streams, c
     assert "to be registered" in stderr.getvalue()
 
 
+def test_marks_a_late_regression_a_person_dismissed_as_a_false_alarm(run):
+    document = verdict_document("watching", "verified")
+    document["late_regressions"] = [
+        {"summary": "P95 latency across the app: 70 ms in the same hours over the past week, 514 ms in the last hour on v42",
+         "dismissed": {"at": "2026-11-05T17:00:00Z", "by": "Pat", "note": "Busier dashboard"}},
+        {"summary": "POST /password_resets failed on first use since v42", "dismissed": None},
+    ]
+    run("verify", "--format=text", client=FakeClient([document]))
+
+    out = run.stdout.getvalue()
+    assert "514 ms in the last hour on v42 (dismissed as a false alarm by Pat: Busier dashboard)" in out
+    assert "POST /password_resets failed on first use since v42\n" in out
+
+
 def test_renders_a_readable_summary(run):
     document = verdict_document("closed", "failed")
     document["findings"] = [
