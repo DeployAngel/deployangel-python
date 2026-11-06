@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.29 (2026-11-05)
 
 - The MCP server's instructions, and the block `deployangel install agents`
   writes, say a failing `p95_latency` finding with an `accept_url` may be an
