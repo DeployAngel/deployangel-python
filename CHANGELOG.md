@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- The MCP server's instructions, and the block `deployangel install agents`
+  writes, say a failing `p95_latency` finding with an `accept_url` may be an
+  intended slowdown, such as a page that now does more work: as with a volume
+  or checkpoint drop, a coding agent hands the link to a person with its
+  evidence, never accepts it (servers from 2026-11-05).
+
 ## 0.1.28 (2026-11-05)
 
 - `deployangel verify` marks a late regression that someone dismissed as a
