@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- `deployangel context <files>` and the MCP server's `get_production_context`
+  say what production does with code before you change it: the routes and
+  tasks the files serve, how often production ran them in the last week and
+  how many failed, whether a release's clearance would cover a change to them
+  at this time of day, their schedules and critical flows, and failed
+  releases and late regressions on them in the last 90 days. Files it can't
+  map are listed as unmapped, never as unused. The MCP server's instructions,
+  and the block `deployangel install agents` writes, tell coding agents to
+  call it before changing code that serves requests or runs as a job
+  (servers from 2026-11-14).
+
 ## 0.1.29 (2026-11-05)
 
 - The MCP server's instructions, and the block `deployangel install agents`

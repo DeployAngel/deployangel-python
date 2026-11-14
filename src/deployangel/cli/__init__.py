@@ -38,6 +38,8 @@ HELP = f"""Usage: deployangel <command> [options]
              requests to production         [--param=NAME=VALUE] [--header="Name: value"]
                                             [--max-requests=200] [--dry-run]
   exception  Details for a fingerprint      deployangel exception FINGERPRINT
+  context    What production does with      deployangel context FILE... [--route="POST /x"] [--job=JOB]
+             code, before you change it     [--format=text|json]
   check      Report a smoke test result     --name=NAME --status=pass|fail [--covers=a,b]
                                             [--commit=SHA | --deployment=ID] [--details-url=URL]
   install    Add a Kamal deploy hook,       deployangel install kamal
@@ -135,6 +137,12 @@ verdict: call the `wait_for_verification` MCP tool with the commit and
   and `list_late_regressions` (or run `{command} status`). If a recent release
   failed, isn't cleared yet, or has a late regression, mention it before other
   work.
+- Before changing code that serves requests or runs as a job: call
+  `get_production_context` with the files you plan to change (or run
+  `{command} context <files>`). If an item's clearance outlook is
+  `rarely_used` or `later_today`, a clearance won't cover your change soon
+  after deploying: say so, and plan to exercise it or report a check that
+  covers it. Files in `unmapped_files` aren't known to be unused.
 {AGENTS_END}
 """
 
@@ -199,7 +207,7 @@ class CLI:
     def run(self) -> int:
         command = self.argv.pop(0) if self.argv else None
         commands = {"release": self.release, "verify": self.verify, "status": lambda: self.verify(status=True),
-                    "plan": self.plan, "exercise": self.exercise, "exception": self.exception, "check": self.check, "install": self.install,
+                    "plan": self.plan, "exercise": self.exercise, "exception": self.exception, "context": self.context, "check": self.check, "install": self.install,
                     "doctor": self.doctor, "setup": self.setup, "token": self.token, "mcp": self.mcp}
         try:
             if command in commands:
@@ -386,6 +394,25 @@ class CLI:
         if needing:
             lines.append(f"Fill path parameters with --param, such as --param {needing['missing'][0]}=42.")
         return lines
+
+    def context(self) -> int:
+        """What production does with some code, before changing it (spec §27,
+        Production context)."""
+        parser = self._parser([])
+        parser.add_argument("files", nargs="*")
+        parser.add_argument("--route", dest="routes", action="append", default=[])
+        parser.add_argument("--job", dest="job_classes", action="append", default=[])
+        parser.add_argument("--format", choices=("text", "json"))
+        options = vars(parser.parse_args(self.argv))
+        if not (options["files"] or options["routes"] or options["job_classes"]):
+            return self._usage_error("context needs files, --route, or --job, like `deployangel context app/views.py`")
+        try:
+            details = self.client().production_context(files=options["files"], routes=options["routes"], job_classes=options["job_classes"])
+        except NotFound:
+            self._error("this DeployAngel server doesn't offer production context yet")
+            return USAGE_ERROR
+        self._output(details, options["format"], lambda: formatter.production_context(details))
+        return 0
 
     def exception(self) -> int:
         if not self.argv or self.argv[0].startswith("-"):

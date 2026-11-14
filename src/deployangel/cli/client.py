@@ -56,6 +56,16 @@ class Client:
     def late_regressions(self, **filters) -> list:
         return self._get("/api/v1/late_regressions", filters)["late_regressions"]
 
+    def production_context(self, files=(), routes=(), job_classes=()) -> dict:
+        """What production does with some code, before a coding agent changes it
+        (spec §27, Production context)."""
+        params = [("files[]", value) for value in files] + [("routes[]", value) for value in routes] + \
+            [("job_classes[]", value) for value in job_classes]
+        url = f"{self.endpoint}/api/v1/production_context"
+        if params:
+            url += "?" + urllib.parse.urlencode(params)
+        return self._request(urllib.request.Request(url, method="GET"))
+
     def verification(self, deployment_id, all_findings: bool = False) -> dict:
         return self._get(f"/api/v1/deployments/{deployment_id}/verification", {"findings": "all"} if all_findings else {})
 

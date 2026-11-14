@@ -12,7 +12,7 @@ import sys
 import time
 from typing import Callable, Optional
 
-from deployangel.cli.client import ApiError
+from deployangel.cli.client import ApiError, NotFound
 from deployangel.cli.waiter import TIMED_OUT, Waiter
 from deployangel.version import VERSION
 
@@ -41,6 +41,11 @@ You cannot accept it, and must not try: tell the user why you think it was inten
 evidence, and give them the accept_url so a person decides. Until someone accepts it, the release
 is failed: never report it as success. A finding with status
 accepted was accepted as intended by the person in accepted_as_intended.
+Before changing code that serves requests or runs as a job, call get_production_context with the files
+you plan to change. It says which routes and jobs they serve and how often production runs them. If an
+item's clearance outlook is rarely_used or later_today, a clearance won't cover your change soon after
+deploying: tell the user, and plan to exercise it or report a check that covers it. unmapped_files are
+files DeployAngel can't map to routes or jobs: never take that to mean they're unused.
 """
 
 TARGET_PROPERTIES = {
@@ -147,6 +152,15 @@ class Server:
                   "One with dismissed set was dismissed by a person as a false alarm, with their reason: it needs no action.",
                   {"since": {"type": "string", "description": "ISO 8601 time"},
                    "limit": {"type": "integer", "minimum": 1, "maximum": 50, "default": 10}}),
+            _tool("get_production_context", "What production does with code before you change it: the routes and jobs the given "
+                  "files serve, how often production ran them in the last 7 days and how many failed, whether a release's clearance "
+                  "would cover a change to them (clearance.outlook: normal_traffic, later_today, rarely_used, or unknown), their "
+                  "schedules and critical flows, and failed releases and late regressions on them in the last 90 days. "
+                  "Files it can't map are listed in unmapped_files; that doesn't mean they're unused.",
+                  {"files": {"type": "array", "items": {"type": "string"},
+                             "description": "Repository-relative paths, e.g. app/views.py (up to 50)."},
+                   "routes": {"type": "array", "items": {"type": "string"}, "description": "Route keys, e.g. \"POST /refunds\"."},
+                   "job_classes": {"type": "array", "items": {"type": "string"}, "description": "Job or task names, e.g. refund_task."}}),
         ]
         if "deployments" in self._token_scopes():
             tools.append(_tool("register_deployment", "Register a deployment so it is verified (manual and CI deploys).",
@@ -181,6 +195,8 @@ class Server:
                 content = self.client.exception(arguments["fingerprint"])
             elif name == "list_late_regressions":
                 content = {"late_regressions": self.client.late_regressions(since=arguments.get("since"), limit=arguments.get("limit", 10))}
+            elif name == "get_production_context":
+                content = self._production_context(arguments)
             elif name == "register_deployment":
                 if "deployments" not in self._token_scopes():
                     raise ValueError("register_deployment is not available for this token")
@@ -205,6 +221,15 @@ class Server:
             return {"found": False, "note": "No matching deployment is registered yet."}
         return {"exit_code": outcome.exit_code, "meaning": MEANINGS.get(outcome.exit_code, "unknown"),
                 "in_progress": outcome.exit_code == TIMED_OUT, "verification": outcome.document}
+
+    def _production_context(self, arguments: dict) -> dict:
+        lookup = {key: [str(value) for value in arguments.get(key) or [] if str(value)] for key in ("files", "routes", "job_classes")}
+        if not any(lookup.values()):
+            raise ValueError("give files, routes, or job_classes")
+        try:
+            return self.client.production_context(**lookup)
+        except NotFound:
+            return {"note": "This DeployAngel server doesn't offer production context yet."}
 
     def _plan_content(self, outcome) -> dict:
         if outcome.not_found:

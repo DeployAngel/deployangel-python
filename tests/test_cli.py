@@ -7,7 +7,7 @@ import os
 
 import pytest
 
-from deployangel.cli import AGENTS_END, AGENTS_START, CLI, agent_instructions, ci, project_command
+from deployangel.cli import AGENTS_END, AGENTS_START, CLI, USAGE_ERROR, agent_instructions, ci, project_command
 from deployangel.cli.client import ApiError, NotFound, Unauthorized
 from deployangel.cli.mcp import Server
 
@@ -79,6 +79,25 @@ class FakeClient:
     def late_regressions(self, **filters):
         return []
 
+    def production_context(self, **lookup):
+        self.calls.append(("production_context", lookup))
+        return production_context_document()
+
+
+def production_context_document():
+    """Production context as the server returns it for a refunds view."""
+    return {"app": "shop", "release": "v41",
+            "files": [{"path": "shop/refunds.py", "items": ["route:POST /refunds"], "exceptions": []},
+                      {"path": "shop/money.py", "items": [], "exceptions": []}],
+            "unmapped_files": ["shop/money.py"],
+            "items": [{"kind": "route", "key": "POST /refunds", "matched_by": ["release_metadata"], "files": ["shop/refunds.py"],
+                       "uses_last_7_days": 3, "failures_last_7_days": 1,
+                       "clearance": {"outlook": "rarely_used", "note": "Rarely used: a clearance won't cover a change to it."},
+                       "pending_first_use": False, "schedule": None, "critical_flows": ["refunds"],
+                       "failed_releases": [{"release": "v39", "signal": "first_use_failure", "label": "First-use failure"}],
+                       "late_regressions": []}],
+            "truncated": False, "notes": ["Uses are counted over the last 7 days."]}
+
 
 def verdict_document(state, verdict=None, initial_check=None, poll=60):
     return {"schema_version": 1, "deployment": {"id": 42, "version": "v184"},
@@ -121,6 +140,18 @@ def run(io_streams, clock):
 
     run.stdout, run.stderr = stdout, stderr
     return run
+
+
+def test_says_what_production_does_with_code_before_changing_it(run):
+    client = FakeClient()
+    assert run("context", "shop/refunds.py", "shop/money.py", "--job=refund_task", "--format=text", client=client) == 0
+    assert client.calls[-1] == ("production_context", {"files": ["shop/refunds.py", "shop/money.py"], "routes": [], "job_classes": ["refund_task"]})
+    output = run.stdout.getvalue()
+    for line in ("Route POST /refunds: 3 requests in 7 days, 1 failed · rarely used: a clearance won't cover it",
+                 "  Critical flows: refunds", "  Failed v39: First-use failure", "Unmapped (not known to be unused): shop/money.py",
+                 "Note: Uses are counted over the last 7 days."):
+        assert line in output
+    assert run("context", client=client) == USAGE_ERROR
 
 
 def test_says_at_the_start_of_a_session_when_the_projects_agent_instructions_are_out_of_date(io_streams, clock, tmp_path):
@@ -614,13 +645,30 @@ class TestMcp:
         server.fake.scopes = ["verifications:read", "deployments"]
         calls = {"get_verification": {}, "wait_for_verification": {"timeout_seconds": 1}, "get_exercise_plan": {},
                  "list_deployments": {}, "get_exception": {"fingerprint": "abc"}, "list_late_regressions": {},
-                 "register_deployment": {"commit": "abc1234"}}
+                 "get_production_context": {"files": ["shop/refunds.py"]}, "register_deployment": {"commit": "abc1234"}}
         assert sorted(tool["name"] for tool in self.request(server, "tools/list")["result"]["tools"]) == sorted(calls)
         for name, arguments in calls.items():
             result = self.request(server, "tools/call", {"name": name, "arguments": arguments})["result"]
             assert isinstance(result["structuredContent"], dict), f"{name} returned {type(result['structuredContent']).__name__}"
         listed = self.request(server, "tools/call", {"name": "list_deployments", "arguments": {}})["result"]["structuredContent"]
         assert listed == {"deployments": [{"id": 42}]}
+
+    def test_says_what_production_does_with_code_before_an_agent_changes_it(self, server):
+        result = self.request(server, "tools/call", {"name": "get_production_context",
+                                                     "arguments": {"files": ["shop/refunds.py", ""], "routes": ["POST /refunds"]}})["result"]
+        assert result["structuredContent"]["items"][0]["clearance"]["outlook"] == "rarely_used"
+        assert server.fake.calls[-1] == ("production_context", {"files": ["shop/refunds.py"], "routes": ["POST /refunds"], "job_classes": []})
+        instructions = self.request(server, "initialize")["result"]["instructions"]
+        assert "get_production_context" in instructions and "never take that to mean they're unused" in instructions
+        error = self.request(server, "tools/call", {"name": "get_production_context", "arguments": {}})["error"]
+        assert error["message"] == "give files, routes, or job_classes"
+
+    def test_says_when_the_server_doesnt_offer_production_context_yet(self, server):
+        def missing(**lookup):
+            raise NotFound("not found")
+        server.fake.production_context = missing
+        result = self.request(server, "tools/call", {"name": "get_production_context", "arguments": {"files": ["shop/models.py"]}})["result"]
+        assert result["structuredContent"] == {"note": "This DeployAngel server doesn't offer production context yet."}
 
     def test_waits_for_a_verdict_with_the_exit_codes_meaning(self, server):
         result = self.request(server, "tools/call", {"name": "wait_for_verification", "arguments": {"until": "verdict"}})["result"]

@@ -249,6 +249,48 @@ def outcome(document: dict) -> str:
     return "has no problems so far, not cleared yet"
 
 
+OUTLOOKS = {"normal_traffic": "normal traffic covers it", "later_today": "runs later today",
+            "rarely_used": "rarely used: a clearance won't cover it", "unknown": "outlook unknown"}
+
+
+def production_context(details: dict) -> str:
+    """Production context, one block per route or job."""
+    lines = []
+    for item in details.get("items") or []:
+        route = item.get("kind") == "route"
+        clearance = item.get("clearance") or {}
+        failures = item.get("failures_last_7_days") or 0
+        lines.append(f"{'Route' if route else 'Job'} {item.get('key')}: {item.get('uses_last_7_days')} "
+                     f"{'requests' if route else 'runs'} in 7 days{f', {failures} failed' if failures else ''} · "
+                     f"{OUTLOOKS.get(clearance.get('outlook'), clearance.get('outlook'))}")
+        if clearance.get("outlook") != "normal_traffic":
+            lines.append(f"  {clearance.get('note')}")
+        if item.get("pending_first_use"):
+            lines.append("  Pending first use since an earlier release")
+        schedule = item.get("schedule")
+        if schedule:
+            next_at = f", next {schedule['next_at']}" if schedule.get("next_at") else ""
+            lines.append(f"  Scheduled {schedule.get('schedule')}{next_at} ({schedule.get('status')})")
+        if item.get("critical_flows"):
+            lines.append(f"  Critical flows: {', '.join(item['critical_flows'])}")
+        for failed in item.get("failed_releases") or []:
+            lines.append(f"  Failed {failed.get('release')}: {failed.get('label')}")
+        for late in item.get("late_regressions") or []:
+            dismissed = " (dismissed)" if late.get("dismissed") else ""
+            lines.append(f"  Late regression in {late.get('release')}{dismissed}: {late.get('summary')}")
+    for file in details.get("files") or []:
+        for exception in file.get("exceptions") or []:
+            lines.append(f"{file.get('path')}: {exception.get('exception_class')} in {exception.get('top_frame')}, "
+                         f"{exception.get('occurrences_last_7_days')} in 7 days (fingerprint {exception.get('fingerprint')})")
+    unmapped = details.get("unmapped_files") or []
+    if unmapped:
+        lines.append(f"Unmapped (not known to be unused): {', '.join(unmapped)}")
+    if not lines:
+        lines.append("Nothing found for these.")
+    lines.extend(f"Note: {note}" for note in details.get("notes") or [])
+    return "\n".join(lines)
+
+
 def exception(details: dict) -> str:
     lines = [f"{details.get('exception_class')}: {details.get('message')}",
              f"Fingerprint {details.get('fingerprint')} · first seen {details.get('first_seen_at')} ({details.get('first_seen_release')})",
