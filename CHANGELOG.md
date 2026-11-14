@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- `deployangel context` says what each clearance outlook means once, after the
+  routes and jobs, rather than under every one, and names the new `scheduled`
+  outlook: a declared job whose next run is handed to watching after a
+  release clears, so there's nothing to exercise (servers from 2026-11-14).
+
 ## 0.1.30 (2026-11-14)
 
 - `deployangel context <files>` and the MCP server's `get_production_context`

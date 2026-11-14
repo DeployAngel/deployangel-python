@@ -95,7 +95,16 @@ def production_context_document():
                        "clearance": {"outlook": "rarely_used", "note": "Rarely used: a clearance won't cover a change to it."},
                        "pending_first_use": False, "schedule": None, "critical_flows": ["refunds"],
                        "failed_releases": [{"release": "v39", "signal": "first_use_failure", "label": "First-use failure"}],
-                       "late_regressions": []}],
+                       "late_regressions": []},
+                      {"kind": "route", "key": "GET /refunds/<id>", "matched_by": ["release_metadata"], "files": ["shop/refunds.py"],
+                       "uses_last_7_days": 0, "failures_last_7_days": 0,
+                       "clearance": {"outlook": "rarely_used", "note": "Rarely used: a clearance won't cover a change to it."},
+                       "pending_first_use": True, "schedule": None, "critical_flows": [], "failed_releases": [], "late_regressions": []},
+                      {"kind": "job_class", "key": "refund_task", "matched_by": ["release_metadata"], "files": [],
+                       "uses_last_7_days": 7, "failures_last_7_days": 0,
+                       "clearance": {"outlook": "scheduled", "note": "Runs on its declared schedule, next at 2026-11-15T03:00:00Z."},
+                       "pending_first_use": False, "critical_flows": [], "failed_releases": [], "late_regressions": [],
+                       "schedule": {"schedule": "at 3am every day", "next_at": "2026-11-15T03:00:00Z", "status": "ran"}}],
             "truncated": False, "notes": ["Uses are counted over the last 7 days."]}
 
 
@@ -149,8 +158,10 @@ def test_says_what_production_does_with_code_before_changing_it(run):
     output = run.stdout.getvalue()
     for line in ("Route POST /refunds: 3 requests in 7 days, 1 failed · rarely used: a clearance won't cover it",
                  "  Critical flows: refunds", "  Failed v39: First-use failure", "Unmapped (not known to be unused): shop/money.py",
-                 "Note: Uses are counted over the last 7 days."):
+                 "Note: Uses are counted over the last 7 days.", "Job refund_task: 7 runs in 7 days · scheduled: watched after clearance",
+                 "  Scheduled at 3am every day, next 2026-11-15T03:00:00Z (ran)", "Runs on its declared schedule, next at 2026-11-15T03:00:00Z."):
         assert line in output
+    assert output.count("Rarely used: a clearance won't cover a change to it.") == 1
     assert run("context", client=client) == USAGE_ERROR
 
 

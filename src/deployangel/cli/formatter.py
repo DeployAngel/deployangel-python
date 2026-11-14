@@ -249,13 +249,16 @@ def outcome(document: dict) -> str:
     return "has no problems so far, not cleared yet"
 
 
-OUTLOOKS = {"normal_traffic": "normal traffic covers it", "later_today": "runs later today",
-            "rarely_used": "rarely used: a clearance won't cover it", "unknown": "outlook unknown"}
+OUTLOOKS = {"normal_traffic": "normal traffic covers it", "scheduled": "scheduled: watched after clearance",
+            "later_today": "runs later today", "rarely_used": "rarely used: a clearance won't cover it",
+            "unknown": "outlook unknown"}
 
 
 def production_context(details: dict) -> str:
-    """Production context, one block per route or job."""
+    """Production context, one block per route or job. What each outlook means
+    is said once, after the items, not under every one."""
     lines = []
+    explained = {}
     for item in details.get("items") or []:
         route = item.get("kind") == "route"
         clearance = item.get("clearance") or {}
@@ -264,7 +267,7 @@ def production_context(details: dict) -> str:
                      f"{'requests' if route else 'runs'} in 7 days{f', {failures} failed' if failures else ''} · "
                      f"{OUTLOOKS.get(clearance.get('outlook'), clearance.get('outlook'))}")
         if clearance.get("outlook") != "normal_traffic":
-            lines.append(f"  {clearance.get('note')}")
+            explained.setdefault(clearance.get("outlook"), clearance.get("note"))
         if item.get("pending_first_use"):
             lines.append("  Pending first use since an earlier release")
         schedule = item.get("schedule")
@@ -278,6 +281,7 @@ def production_context(details: dict) -> str:
         for late in item.get("late_regressions") or []:
             dismissed = " (dismissed)" if late.get("dismissed") else ""
             lines.append(f"  Late regression in {late.get('release')}{dismissed}: {late.get('summary')}")
+    lines.extend(note for note in explained.values() if note)
     for file in details.get("files") or []:
         for exception in file.get("exceptions") or []:
             lines.append(f"{file.get('path')}: {exception.get('exception_class')} in {exception.get('top_frame')}, "
