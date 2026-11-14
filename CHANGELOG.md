@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.31 (2026-11-14)
 
 - `deployangel context` says what each clearance outlook means once, after the
   routes and jobs, rather than under every one, and names the new `scheduled`
