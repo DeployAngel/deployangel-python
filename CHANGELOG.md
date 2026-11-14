@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.30 (2026-11-14)
 
 - `deployangel context <files>` and the MCP server's `get_production_context`
   say what production does with code before you change it: the routes and
